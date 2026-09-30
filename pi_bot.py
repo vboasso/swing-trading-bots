@@ -76,6 +76,7 @@ def main():
     symbol = 'PI/USDT'
     last_buy_price = get_last_buy()
     
+    consecutive_errors = 0
     while True:
         try:
             # 1. Fetch Balances
@@ -147,12 +148,18 @@ def main():
             else:
                 logging.warning("Not enough data to calculate RSI.")
                 
+            consecutive_errors = 0
+            consecutive_errors = 0
             time.sleep(900) # Wait 15 minutes between checks
             
         except Exception as e:
             error_msg = str(e)
-            logging.error(f"Error in main loop: {error_msg}")
-            send_telegram_message(f"⚠️ *ALERTA (PI BOT)* ⚠️\nSe detectó un problema de ejecución:\n`{error_msg}`")
+            consecutive_errors += 1
+            if consecutive_errors >= 2:
+                logging.error(f"Error persistente in main loop: {error_msg}")
+                send_telegram_message(f"⚠️ *ALERTA (PI BOT)* ⚠️\nSe detectó un problema de red persistente:\n`{error_msg}`")
+            else:
+                logging.warning(f"Micro-corte de red detectado (intento {consecutive_errors}). Reintentando en silencio...")
             time.sleep(60)
 
 if __name__ == "__main__":
