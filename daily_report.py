@@ -1,4 +1,5 @@
 import os
+import time
 import requests
 import subprocess
 import ccxt
@@ -10,17 +11,20 @@ load_dotenv("/home/vale/.env")
 TELEGRAM_TOKEN = "8864696569:AAH77c3tRbpYpDdaccF2q_pVtwf6pXy1U5A"
 TELEGRAM_CHAT_ID = "305025287"
 
-# Web3 / RAVEN Setup
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 RAVEN_ADDRESS = os.getenv("RAVEN_ADDRESS", "0xcd7c5025753a49f1881b31c48caa7c517bb46308")
 BSC_RPC = "https://bsc-dataseed.binance.org/"
-web3 = Web3(Web3.HTTPProvider(BSC_RPC))
 ERC20_ABI = [{"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"}]
 
 def send_telegram_message(text):
-    url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-    payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-    requests.post(url, json=payload, timeout=10)
+    for attempt in range(3):
+        try:
+            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+            requests.post(url, json=payload, timeout=10)
+            break
+        except:
+            time.sleep(30)
 
 def get_last_log(service_name):
     try:
@@ -32,7 +36,8 @@ def get_last_log(service_name):
     except:
         return "No se pudo leer el log."
 
-def main():
+def fetch_data():
+    web3 = Web3(Web3.HTTPProvider(BSC_RPC))
     msg = "📊 *REPORTE DIARIO DE INVERSIONES* 📊\n\n"
     
     # --- RAVEN SECTION ---
@@ -43,8 +48,9 @@ def main():
         
         price_raven = 0
         try:
-            res = requests.get("https://api.coingecko.com/api/v3/simple/price?ids=raven-protocol&vs_currencies=usd").json()
-            price_raven = res.get("raven-protocol", {}).get("usd", 0)
+            # Fallback to geckoterminal since coingecko is slow
+            res = requests.get("https://api.geckoterminal.com/api/v2/networks/bsc/pools/0x5f0a719bf30fb649e79435b642e61df1ffed2ba8", timeout=10).json()
+            price_raven = float(res['data']['attributes']['base_token_price_usd'])
         except: pass
 
         log_raven = get_last_log("ravenbot")
@@ -56,6 +62,7 @@ def main():
         msg += f"📝 Estado: `{log_raven}`\n\n"
     except Exception as e:
         msg += f"🦅 *RAVEN BOT:* Error al cargar ({e})\n\n"
+        raise e  # Force retry
 
     # --- PI SECTION ---
     try:
@@ -81,8 +88,22 @@ def main():
         msg += f"📝 Estado: `{log_pi}`\n"
     except Exception as e:
         msg += f"🟣 *PI BOT:* Error al cargar ({e})\n"
+        raise e # Force retry
 
-    send_telegram_message(msg)
+    return msg
+
+def main():
+    # Retry logic up to 3 times with 60s delay
+    for attempt in range(3):
+        try:
+            msg = fetch_data()
+            send_telegram_message(msg)
+            return
+        except Exception as e:
+            time.sleep(60)
+            
+    # If it completely fails 3 times, send the error report
+    send_telegram_message("⚠️ *ERROR EN REPORTE DIARIO* ⚠️\nNo se pudo conectar a la red después de 3 intentos.")
 
 if __name__ == "__main__":
     main()
