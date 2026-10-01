@@ -118,7 +118,9 @@ def main():
                             try:
                                 # Buy using 98% of USDT to account for fees/slippage
                                 amount_to_buy = (usdt_balance * 0.98) / current_price
-                                order = exchange.create_market_buy_order(symbol, amount_to_buy)
+                                amount_to_buy = float(exchange.amount_to_precision(symbol, amount_to_buy))
+                                limit_price = float(exchange.price_to_precision(symbol, current_price * 1.02))
+                                order = exchange.create_limit_buy_order(symbol, amount_to_buy, limit_price)
                                 last_buy_price = current_price
                                 set_last_buy(last_buy_price)
                                 logging.info(f"Buy Order Success: {order}")
@@ -135,7 +137,9 @@ def main():
                     if profit_pct >= 25 or (rsi > 75 and (last_buy_price == 0 or current_price > last_buy_price)):
                         logging.info(f"Sell condition met. Profit: {profit_pct:.2f}% | RSI: {rsi:.2f}")
                         try:
-                            order = exchange.create_market_sell_order(symbol, pi_balance)
+                            pi_balance = float(exchange.amount_to_precision(symbol, pi_balance))
+                            limit_price = float(exchange.price_to_precision(symbol, current_price * 0.98))
+                            order = exchange.create_limit_sell_order(symbol, pi_balance, limit_price)
                             last_buy_price = 0
                             set_last_buy(0)
                             logging.info(f"Sell Order Success: {order}")
