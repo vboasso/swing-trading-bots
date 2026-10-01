@@ -322,12 +322,17 @@ def main():
         except Exception as e:
             error_msg = str(e)
             consecutive_errors += 1
-            if consecutive_errors >= 2:
+            
+            retry_delays = [2, 10, 60]
+            
+            if consecutive_errors > len(retry_delays):
                 logging.error(f"Error persistente in main loop: {error_msg}")
                 send_telegram_message(f"⚠️ *ALERTA (RAVEN BOT)* ⚠️\nSe detectó un problema de red persistente:\n`{error_msg}`")
+                time.sleep(60)
             else:
-                logging.warning(f"Micro-corte de red detectado (intento {consecutive_errors}). Reintentando en silencio...")
-            time.sleep(60)
+                delay = retry_delays[consecutive_errors - 1]
+                logging.warning(f"Micro-corte de red detectado (intento {consecutive_errors}). Reintentando en {delay} segundos...")
+                time.sleep(delay)
 
 if __name__ == "__main__":
     main()
