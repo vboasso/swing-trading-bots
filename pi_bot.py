@@ -117,9 +117,9 @@ def main():
                             logging.info("RSI below 25. Executing Buy...")
                             try:
                                 # Buy using 98% of USDT to account for fees/slippage
-                                amount_to_buy = (usdt_balance * 0.98) / current_price
-                                amount_to_buy = float(exchange.amount_to_precision(symbol, amount_to_buy))
                                 limit_price = float(exchange.price_to_precision(symbol, current_price * 1.02))
+                                amount_to_buy = (usdt_balance * 0.98) / limit_price
+                                amount_to_buy = float(exchange.amount_to_precision(symbol, amount_to_buy))
                                 order = exchange.create_limit_buy_order(symbol, amount_to_buy, limit_price)
                                 last_buy_price = current_price
                                 set_last_buy(last_buy_price)
