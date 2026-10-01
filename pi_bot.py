@@ -162,9 +162,11 @@ def main():
             
             retry_delays = [2, 10, 60]
             
-            if consecutive_errors > len(retry_delays):
+            if consecutive_errors == len(retry_delays) + 1:
                 logging.error(f"Error persistente in main loop: {error_msg}")
                 send_telegram_message(f"⚠️ *ALERTA (PI BOT)* ⚠️\nSe detectó un problema de red persistente:\n`{error_msg}`")
+                time.sleep(60)
+            elif consecutive_errors > len(retry_delays) + 1:
                 time.sleep(60)
             else:
                 delay = retry_delays[consecutive_errors - 1]
