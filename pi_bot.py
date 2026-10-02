@@ -81,8 +81,8 @@ def main():
         try:
             # 1. Fetch Balances
             balance = exchange.fetch_balance()
-            pi_balance = balance['total'].get('PI', 0)
-            usdt_balance = balance['total'].get('USDT', 0)
+            pi_balance = balance['free'].get('PI', 0)
+            usdt_balance = balance['free'].get('USDT', 0)
             
             # 2. Determine State
             state = "WAITING_BUY"
