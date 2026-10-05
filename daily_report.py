@@ -60,10 +60,15 @@ def calculate_variations(current_capital):
         if not old or old == 0: return 0.0
         return ((new - old) / old) * 100
 
-    cap_yesterday = history.get(yesterday, current_capital)
-    cap_last_week = history.get(last_week, current_capital)
+    # Sort recorded dates
+    prev_dates = [d for d in sorted(history.keys()) if d < today]
+    cap_previous = history[prev_dates[-1]] if prev_dates else initial_capital
 
-    pct_daily = calc_pct(cap_yesterday, current_capital)
+    seven_days_ago = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
+    week_candidates = [d for d in sorted(history.keys()) if d <= seven_days_ago]
+    cap_last_week = history[week_candidates[-1]] if week_candidates else initial_capital
+
+    pct_daily = calc_pct(cap_previous, current_capital)
     pct_weekly = calc_pct(cap_last_week, current_capital)
     pct_total = calc_pct(initial_capital, current_capital)
 
@@ -71,7 +76,7 @@ def calculate_variations(current_capital):
     history[today] = current_capital
     data["history"] = history
     with open(CAPITAL_FILE, 'w') as f:
-        json.dump(data, f)
+        json.dump(data, f, indent=2)
 
     return pct_daily, pct_weekly, pct_total, initial_capital
 
@@ -102,10 +107,11 @@ def fetch_data():
         
         price_raven = 0
         try:
-            # Fallback to geckoterminal since coingecko is slow
-            res = requests.get("https://api.geckoterminal.com/api/v2/networks/bsc/pools/0x5f0a719bf30fb649e79435b642e61df1ffed2ba8", timeout=10).json()
+            # Fetch RAVEN price from GeckoTerminal pool
+            res = requests.get("https://api.geckoterminal.com/api/v2/networks/bsc/pools/0x547037d9d7ac11cb2740727a7f4ca41111d7e608", timeout=10).json()
             price_raven = float(res['data']['attributes']['base_token_price_usd'])
-        except: pass
+        except Exception as e:
+            pass
 
         capital_raven = (balance_raven * price_raven) + (bnb_balance * price_bnb)
         total_capital += capital_raven
