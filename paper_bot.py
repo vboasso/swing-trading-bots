@@ -5,8 +5,6 @@ import csv
 import logging
 import requests
 import ccxt
-import numpy as np
-import pandas as pd
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -90,18 +88,32 @@ def log_trade(symbol, action, price, amount, usdt_value, profit_pct=0.0):
     except Exception as e:
         logging.error(f"Error logging trade: {e}")
 
-def calculate_rsi(closes, period=14):
-    if len(closes) < period + 1:
+def calculate_rsi(prices, period=14):
+    if len(prices) < period + 1:
         return 50.0
-    closes_series = pd.Series(closes)
-    delta = closes_series.diff()
-    gain = delta.clip(lower=0)
-    loss = -1 * delta.clip(upper=0)
-    avg_gain = gain.ewm(com=period - 1, min_periods=period).mean()
-    avg_loss = loss.ewm(com=period - 1, min_periods=period).mean()
+    gains = []
+    losses = []
+    for i in range(1, len(prices)):
+        change = prices[i] - prices[i-1]
+        if change > 0:
+            gains.append(change)
+            losses.append(0)
+        else:
+            gains.append(0)
+            losses.append(abs(change))
+            
+    avg_gain = sum(gains[:period]) / period
+    avg_loss = sum(losses[:period]) / period
+    
+    for i in range(period, len(prices)-1):
+        avg_gain = (avg_gain * (period - 1) + gains[i]) / period
+        avg_loss = (avg_loss * (period - 1) + losses[i]) / period
+
+    if avg_loss == 0:
+        return 100.0
     rs = avg_gain / avg_loss
     rsi = 100 - (100 / (1 + rs))
-    return float(rsi.iloc[-1])
+    return float(rsi)
 
 def fetch_candles_and_rsi(exchange, symbol):
     try:
