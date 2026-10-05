@@ -149,16 +149,19 @@ def send_telegram_message(text):
 def execute_buy(current_price):
     if not PRIVATE_KEY or not WALLET_ADDRESS:
         logging.error("Missing credentials in .env")
-        return False
+        return None
     logging.info("Executing BUY (BNB -> RAVEN)")
     try:
         router = web3.eth.contract(address=web3.to_checksum_address(ROUTER_ADDRESS), abi=ROUTER_ABI)
         account = web3.eth.account.from_key(PRIVATE_KEY)
+        raven_contract = web3.eth.contract(address=web3.to_checksum_address(RAVEN_ADDRESS), abi=ERC20_ABI)
         
         balance = web3.eth.get_balance(account.address)
         if balance == 0:
             logging.info("No BNB to buy.")
-            return False
+            return None
+            
+        raven_before = raven_contract.functions.balanceOf(account.address).call() / (10**18)
             
         # Use 90% of available BNB to keep enough for gas fees
         amount_to_buy = int(balance * 0.9)
@@ -178,13 +181,40 @@ def execute_buy(current_price):
         signed_tx = web3.eth.account.sign_transaction(tx, PRIVATE_KEY)
         tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
         logging.info(f"Buy TX Hash: {web3.to_hex(tx_hash)}")
+        
+        receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        if receipt['status'] != 1:
+            raise Exception("Transacción fallida en la blockchain.")
+            
+        raven_after = raven_contract.functions.balanceOf(account.address).call() / (10**18)
+        tokens_received = raven_after - raven_before
         human_bnb = amount_to_buy / (10**18)
-        send_telegram_message(f"🟢 *COMPRA DE RAVEN EJECUTADA*\nSe invirtieron {human_bnb:.4f} BNB a un precio aprox de ${current_price:.8f}.\nHash: `{web3.to_hex(tx_hash)}`")
-        return True
+        
+        try:
+            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=5).json()
+            bnb_usd = float(r.get("price", 600))
+        except Exception:
+            bnb_usd = 600.0
+            
+        if tokens_received > 0:
+            usd_spent = human_bnb * bnb_usd
+            real_price = usd_spent / tokens_received
+        else:
+            real_price = current_price
+            
+        logging.info(f"Real buy price: ${real_price:.8f} (Tokens: {tokens_received:,.2f})")
+        send_telegram_message(
+            f"🟢 *COMPRA DE RAVEN EJECUTADA*\n"
+            f"🔹 Inversión: `{human_bnb:.4f} BNB` (${usd_spent:.2f} USD)\n"
+            f"🔹 Recibidos: `{tokens_received:,.2f} RAVEN`\n"
+            f"📈 *Precio real promedio:* `${real_price:.8f}`\n"
+            f"🔗 Hash: `{web3.to_hex(tx_hash)}`"
+        )
+        return real_price
     except Exception as e:
         logging.error(f"Buy execution failed: {e}")
         send_telegram_message(f"❌ *ERROR DE COMPRA*\nDetalle: `{e}`")
-        return False
+        return None
 
 def execute_sell(current_price):
     if not PRIVATE_KEY or not WALLET_ADDRESS:
@@ -200,6 +230,8 @@ def execute_sell(current_price):
             logging.info("No RAVEN to sell.")
             return False
             
+        bnb_before = web3.eth.get_balance(account.address) / (10**18)
+
         # Check allowance
         allowance = raven_contract.functions.allowance(account.address, web3.to_checksum_address(ROUTER_ADDRESS)).call()
         if allowance < balance:
@@ -229,8 +261,31 @@ def execute_sell(current_price):
         signed_tx = web3.eth.account.sign_transaction(tx, PRIVATE_KEY)
         tx_hash = web3.eth.send_raw_transaction(signed_tx.raw_transaction)
         logging.info(f"Sell TX Hash: {web3.to_hex(tx_hash)}")
+        
+        receipt = web3.eth.wait_for_transaction_receipt(tx_hash, timeout=60)
+        if receipt['status'] != 1:
+            raise Exception("Transacción de venta fallida en la blockchain.")
+            
+        bnb_after = web3.eth.get_balance(account.address) / (10**18)
+        bnb_received = bnb_after - bnb_before
         human_raven = balance / (10**18)
-        send_telegram_message(f"🔴 *VENTA DE RAVEN EJECUTADA*\nSe vendieron {human_raven:,.0f} RAVEN a un precio aprox de ${current_price:.8f}.\nHash: `{web3.to_hex(tx_hash)}`")
+        
+        try:
+            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=5).json()
+            bnb_usd = float(r.get("price", 600))
+        except Exception:
+            bnb_usd = 600.0
+            
+        usd_received = bnb_received * bnb_usd
+        real_sell_price = (usd_received / human_raven) if human_raven > 0 else current_price
+        
+        send_telegram_message(
+            f"🔴 *VENTA DE RAVEN EJECUTADA*\n"
+            f"🔹 Tokens vendidos: `{human_raven:,.2f} RAVEN`\n"
+            f"🔹 BNB recibido: `{bnb_received:.4f} BNB` (${usd_received:.2f} USD)\n"
+            f"📈 *Precio real de venta:* `${real_sell_price:.8f}`\n"
+            f"🔗 Hash: `{web3.to_hex(tx_hash)}`"
+        )
         return True
     except Exception as e:
         logging.error(f"Sell execution failed: {e}")
@@ -298,8 +353,9 @@ def main():
                     if bnb_balance > 0.01: # Minimum BNB to trade
                         if rsi < 25:
                             logging.info("RSI below 25. Executing Buy...")
-                            if execute_buy(current_price):
-                                last_buy_price = current_price
+                            real_price = execute_buy(current_price)
+                            if real_price:
+                                last_buy_price = real_price
                                 set_last_buy(last_buy_price)
                     else:
                         logging.info("Not enough BNB to buy.")

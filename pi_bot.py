@@ -121,10 +121,16 @@ def main():
                                 amount_to_buy = (usdt_balance * 0.98) / limit_price
                                 amount_to_buy = float(exchange.amount_to_precision(symbol, amount_to_buy))
                                 order = exchange.create_limit_buy_order(symbol, amount_to_buy, limit_price)
-                                last_buy_price = current_price
+                                time.sleep(2)
+                                try:
+                                    order_info = exchange.fetch_order(order['id'], symbol)
+                                    real_price = order_info.get('average') or order_info.get('price') or current_price
+                                except Exception:
+                                    real_price = order.get('average') or order.get('price') or current_price
+                                last_buy_price = float(real_price)
                                 set_last_buy(last_buy_price)
-                                logging.info(f"Buy Order Success: {order}")
-                                send_telegram_message(f"🟢 *COMPRA DE PI EJECUTADA*\nSe compró PI exitosamente a ${current_price:.4f}.")
+                                logging.info(f"Buy Order Success: {order['id']} at real price: {last_buy_price}")
+                                send_telegram_message(f"🟢 *COMPRA DE PI EJECUTADA*\nSe compraron tokens PI a un precio real promedio de `${last_buy_price:.4f}`.")
                             except Exception as e:
                                 logging.error(f"Buy Error: {e}")
                                 send_telegram_message(f"❌ *ERROR DE COMPRA PI*\nDetalle: `{e}`")
@@ -140,10 +146,16 @@ def main():
                             pi_balance = float(exchange.amount_to_precision(symbol, pi_balance))
                             limit_price = float(exchange.price_to_precision(symbol, current_price * 0.98))
                             order = exchange.create_limit_sell_order(symbol, pi_balance, limit_price)
+                            time.sleep(2)
+                            try:
+                                order_info = exchange.fetch_order(order['id'], symbol)
+                                real_sell_price = order_info.get('average') or order_info.get('price') or current_price
+                            except Exception:
+                                real_sell_price = order.get('average') or order.get('price') or current_price
                             last_buy_price = 0
                             set_last_buy(0)
-                            logging.info(f"Sell Order Success: {order}")
-                            send_telegram_message(f"🔴 *VENTA DE PI EJECUTADA*\nSe vendieron {pi_balance:.2f} PI por USDT a ${current_price:.4f}.")
+                            logging.info(f"Sell Order Success: {order['id']} at real price: {real_sell_price}")
+                            send_telegram_message(f"🔴 *VENTA DE PI EJECUTADA*\nSe vendieron {pi_balance:.2f} PI por USDT a un precio real de `${float(real_sell_price):.4f}`.\n📈 Rendimiento estimado: `{profit_pct:.2f}%`")
                         except Exception as e:
                             logging.error(f"Sell Error: {e}")
                             send_telegram_message(f"❌ *ERROR DE VENTA PI*\nDetalle: `{e}`")
