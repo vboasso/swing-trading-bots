@@ -1,0 +1,17 @@
+[Unit]
+Description=Trading Dashboard Kiosk Display
+After=network.target dashboard.service
+Wants=dashboard.service
+
+[Service]
+Type=simple
+User=vale
+Group=vale
+PAMName=login
+Environment=DISPLAY=:0
+ExecStart=/usr/bin/xinit /home/vale/kiosk.sh -- :0 vt7 -nocursor
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
