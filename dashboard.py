@@ -641,19 +641,17 @@ HTML_PAGE = """<!DOCTYPE html>
 
     /* Gauge Container */
     .gauge-wrapper {
-      position: relative;
       width: 100%;
-      height: 180px;
       display: flex;
       flex-direction: column;
       align-items: center;
       justify-content: center;
-      margin: 4px 0 12px;
+      margin: 2px 0 12px;
     }
 
     .gauge-svg {
       width: 250px;
-      height: 155px;
+      height: 135px;
       overflow: visible;
     }
 
@@ -663,12 +661,8 @@ HTML_PAGE = """<!DOCTYPE html>
     }
 
     .gauge-readout {
-      position: absolute;
-      bottom: 6px;
-      left: 50%;
-      transform: translateX(-50%);
+      margin-top: 2px;
       text-align: center;
-      pointer-events: none;
     }
 
     .rsi-number {
@@ -1030,11 +1024,11 @@ HTML_PAGE = """<!DOCTYPE html>
           <!-- Needle -->
           <g class="gauge-needle" id="needle_${botId}" style="transform: rotate(${angle}deg);">
             <!-- Needle pointer -->
-            <path d="M 122 125 L 125 40 L 128 125 Z" fill="#ffffff" filter="drop-shadow(0 0 3px rgba(255,255,255,0.8))" />
-            <polygon points="123,55 125,38 127,55" fill="${clampedRsi <= 35 ? '#10b981' : (clampedRsi >= 65 ? '#ef4444' : '#38bdf8')}" />
+            <path d="M 122.5 125 L 125 42 L 127.5 125 Z" fill="#ffffff" filter="drop-shadow(0 0 3px rgba(255,255,255,0.8))" />
+            <polygon points="123.5,56 125,40 126.5,56" fill="${clampedRsi <= 35 ? '#10b981' : (clampedRsi >= 65 ? '#ef4444' : '#38bdf8')}" />
             <!-- Needle pivot base -->
-            <circle cx="125" cy="125" r="9" fill="#1e293b" stroke="#ffffff" stroke-width="2.5" />
-            <circle cx="125" cy="125" r="4" fill="${clampedRsi <= 35 ? '#10b981' : (clampedRsi >= 65 ? '#ef4444' : '#38bdf8')}" />
+            <circle cx="125" cy="125" r="7" fill="#1e293b" stroke="#ffffff" stroke-width="2" />
+            <circle cx="125" cy="125" r="3.5" fill="${clampedRsi <= 35 ? '#10b981' : (clampedRsi >= 65 ? '#ef4444' : '#38bdf8')}" />
           </g>
         </svg>
 
