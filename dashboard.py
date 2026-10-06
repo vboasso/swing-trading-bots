@@ -428,6 +428,10 @@ HTML_PAGE = """<!DOCTYPE html>
       padding: 0;
     }
 
+    html {
+      scroll-behavior: smooth;
+    }
+
     body {
       background-color: var(--bg-main);
       color: var(--text-main);
@@ -435,6 +439,23 @@ HTML_PAGE = """<!DOCTYPE html>
       line-height: 1.5;
       min-height: 100vh;
       padding: 16px 20px 40px;
+      overflow-y: scroll;
+      scrollbar-width: thin;
+      scrollbar-color: #334155 #0a0e17;
+    }
+
+    ::-webkit-scrollbar {
+      width: 8px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #0a0e17;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #334155;
+      border-radius: 4px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #475569;
     }
 
     /* Container */
@@ -870,7 +891,192 @@ HTML_PAGE = """<!DOCTYPE html>
       color: #cbd5e1;
     }
 
-    /* Responsive */
+    /* Scroll Navigation Button */
+    .scroll-btn-wrap {
+      display: flex;
+      justify-content: center;
+      margin: 4px 0 14px;
+    }
+
+    .btn-scroll-toggle {
+      background: #1e293b;
+      border: 1px solid var(--border-accent);
+      color: var(--accent-blue);
+      padding: 6px 16px;
+      border-radius: 20px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+      transition: all 0.2s;
+    }
+
+    .btn-scroll-toggle:hover {
+      background: #334155;
+      color: #fff;
+      transform: translateY(-1px);
+    }
+
+    /* Netbook 1024x600 & Compact Screen Optimization */
+    @media (max-height: 720px), (max-width: 1100px) {
+      body {
+        padding: 6px 12px 18px;
+      }
+
+      header {
+        padding: 6px 12px;
+        margin-bottom: 8px;
+        border-radius: 10px;
+        gap: 8px;
+      }
+
+      .brand {
+        gap: 8px;
+      }
+
+      .brand-icon {
+        width: 32px;
+        height: 32px;
+        font-size: 18px;
+        border-radius: 8px;
+      }
+
+      .brand-title h1 {
+        font-size: 0.95rem;
+      }
+
+      .brand-title p {
+        display: none;
+      }
+
+      .header-stats {
+        gap: 8px;
+      }
+
+      .stat-pill {
+        padding: 2px 8px;
+        border-radius: 6px;
+      }
+
+      .stat-pill .label {
+        font-size: 0.58rem;
+      }
+
+      .stat-pill .val {
+        font-size: 0.82rem;
+      }
+
+      .btn-refresh {
+        padding: 4px 8px;
+        font-size: 0.72rem;
+      }
+
+      .bots-grid {
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+        margin-bottom: 8px;
+      }
+
+      .card {
+        padding: 8px 10px 8px;
+        border-radius: 12px;
+      }
+
+      .card-top {
+        margin-bottom: 2px;
+      }
+
+      .card-symbol .pair {
+        font-size: 0.95rem;
+      }
+
+      .card-symbol .sub {
+        font-size: 0.65rem;
+      }
+
+      .badge-mode {
+        font-size: 0.55rem;
+        padding: 2px 5px;
+      }
+
+      .gauge-wrapper {
+        margin: 0 0 4px;
+      }
+
+      .gauge-svg {
+        width: 175px;
+        height: 98px;
+      }
+
+      .gauge-readout {
+        margin-top: 0px;
+      }
+
+      .rsi-number {
+        font-size: 1.55rem;
+        line-height: 1;
+      }
+
+      .rsi-desc {
+        font-size: 0.6rem;
+        margin-top: 1px;
+      }
+
+      .state-banner {
+        padding: 4px 6px;
+        font-size: 0.68rem;
+        margin-bottom: 4px;
+        border-radius: 6px;
+      }
+
+      .data-grid {
+        padding: 6px;
+        gap: 3px;
+        margin-bottom: 4px;
+        border-radius: 8px;
+      }
+
+      .data-label {
+        font-size: 0.58rem;
+      }
+
+      .data-val {
+        font-size: 0.78rem;
+      }
+
+      .pnl-badge {
+        font-size: 0.7rem;
+        padding: 1px 4px;
+      }
+
+      .card-footer {
+        padding-top: 2px;
+        font-size: 0.6rem;
+      }
+
+      .scroll-btn-wrap {
+        margin: 2px 0 8px;
+      }
+
+      .btn-scroll-toggle {
+        padding: 3px 12px;
+        font-size: 0.7rem;
+      }
+
+      .history-card {
+        padding: 12px;
+        border-radius: 12px;
+      }
+
+      .history-title {
+        font-size: 0.85rem;
+        margin-bottom: 8px;
+      }
+    }
+
     @media (max-width: 768px) {
       body {
         padding: 10px;
@@ -929,6 +1135,13 @@ HTML_PAGE = """<!DOCTYPE html>
   <!-- 4 Speedometer Cards -->
   <div class="bots-grid" id="bots-container">
     <!-- Cards will be populated by JS -->
+  </div>
+
+  <!-- Scroll Navigation Helper -->
+  <div class="scroll-btn-wrap">
+    <button class="btn-scroll-toggle" id="scroll-toggle-btn" onclick="toggleScroll()">
+      <span id="scroll-icon">▼</span> <span id="scroll-text">Ver Historial de Velas Recientes</span>
+    </button>
   </div>
 
   <!-- Recent Logs Feed -->
@@ -1224,6 +1437,45 @@ HTML_PAGE = """<!DOCTYPE html>
 
   // Initial load
   fetchData();
+
+  // Scroll toggle button logic
+  function toggleScroll() {
+    const hist = document.querySelector('.history-card');
+    if (window.scrollY < 80) {
+      if (hist) hist.scrollIntoView({ behavior: 'smooth' });
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+  }
+
+  window.addEventListener('scroll', () => {
+    const btnText = document.getElementById('scroll-text');
+    const btnIcon = document.getElementById('scroll-icon');
+    if (!btnText || !btnIcon) return;
+    if (window.scrollY > 80) {
+      btnIcon.textContent = '▲';
+      btnText.textContent = 'Volver a Indicadores';
+    } else {
+      btnIcon.textContent = '▼';
+      btnText.textContent = 'Ver Historial de Velas Recientes';
+    }
+  });
+
+  // Keyboard navigation for Netbook keys (Arrows, PageUp/Down, Space, J/K, R)
+  window.addEventListener('keydown', (e) => {
+    // Prevent default scroll handling only if we handle it
+    if (e.key === 'ArrowDown' || e.key === 'PageDown' || e.key === ' ' || e.key === 'j') {
+      window.scrollBy({ top: 220, behavior: 'smooth' });
+    } else if (e.key === 'ArrowUp' || e.key === 'PageUp' || e.key === 'k') {
+      window.scrollBy({ top: -220, behavior: 'smooth' });
+    } else if (e.key === 'Home') {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    } else if (e.key === 'End') {
+      window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+    } else if (e.key === 'r' || e.key === 'R') {
+      fetchData();
+    }
+  });
 </script>
 
 </body>
