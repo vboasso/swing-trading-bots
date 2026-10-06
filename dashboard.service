@@ -1,0 +1,16 @@
+[Unit]
+Description=Netbook Trading Bots Web Dashboard
+After=network.target
+
+[Service]
+Type=simple
+User=vale
+WorkingDirectory=/home/vale
+ExecStart=/home/vale/venv/bin/python /home/vale/dashboard.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
