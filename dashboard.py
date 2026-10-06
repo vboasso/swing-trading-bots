@@ -27,6 +27,7 @@ RAVEN_BUY_PRICE = os.path.join(BASE_DIR, ".raven_buy_price")
 PAPER_STATE = os.path.join(BASE_DIR, "paper_bot_state.json")
 PAPER_HISTORY = os.path.join(BASE_DIR, "paper_bot_history.csv")
 CAPITAL_HISTORY = os.path.join(BASE_DIR, ".capital_history.json")
+TUNNEL_FILE = os.path.join(BASE_DIR, "tunnel_url.txt")
 
 
 def safe_float(val, default=0.0):
@@ -382,10 +383,19 @@ def get_all_bot_data():
         except Exception:
             pass
 
+    tunnel_url = ""
+    if os.path.exists(TUNNEL_FILE):
+        try:
+            with open(TUNNEL_FILE, "r", encoding="utf-8") as f:
+                tunnel_url = f.read().strip()
+        except Exception:
+            pass
+
     return {
         "timestamp": now_str,
         "system": get_system_stats(),
         "capital": capital_info,
+        "tunnel_url": tunnel_url,
         "bots": [pi_data, raven_data, sui_data, pepe_data],
     }
 
@@ -557,13 +567,6 @@ HTML_PAGE = """<!DOCTYPE html>
       background-color: var(--accent-green);
       border-radius: 50%;
       box-shadow: 0 0 8px var(--accent-green);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0% { transform: scale(0.95); opacity: 0.8; }
-      50% { transform: scale(1.3); opacity: 1; box-shadow: 0 0 14px var(--accent-green); }
-      100% { transform: scale(0.95); opacity: 0.8; }
     }
 
     .btn-refresh {
@@ -1123,6 +1126,11 @@ HTML_PAGE = """<!DOCTYPE html>
         <span class="val" id="sys-load">-- | --</span>
       </div>
 
+      <div class="stat-pill" id="pill-tunnel" style="display:none">
+        <span class="label">🌍 Remoto (Cloudflare)</span>
+        <span class="val" style="font-size:0.75rem"><a href="#" id="tunnel-link" target="_blank" style="color:var(--accent-blue);text-decoration:none">...</a></span>
+      </div>
+
       <div class="refresh-box">
         <div class="pulse-dot" title="Conexión en vivo activa"></div>
         <button class="btn-refresh" onclick="fetchData()">
@@ -1196,11 +1204,6 @@ HTML_PAGE = """<!DOCTYPE html>
               <stop offset="75%" stop-color="#f97316" />
               <stop offset="100%" stop-color="#ef4444" />
             </linearGradient>
-            
-            <filter id="glow_${botId}" x="-20%" y="-20%" width="140%" height="140%">
-              <feGaussianBlur stdDeviation="3" result="blur" />
-              <feComposite in="SourceGraphic" in2="blur" operator="over" />
-            </filter>
           </defs>
 
           <!-- Outer background track -->
@@ -1237,7 +1240,7 @@ HTML_PAGE = """<!DOCTYPE html>
           <!-- Needle -->
           <g class="gauge-needle" id="needle_${botId}" style="transform: rotate(${angle}deg);">
             <!-- Needle pointer -->
-            <path d="M 122.5 125 L 125 42 L 127.5 125 Z" fill="#ffffff" filter="drop-shadow(0 0 3px rgba(255,255,255,0.8))" />
+            <path d="M 122.5 125 L 125 42 L 127.5 125 Z" fill="#ffffff" />
             <polygon points="123.5,56 125,40 126.5,56" fill="${clampedRsi <= 35 ? '#10b981' : (clampedRsi >= 65 ? '#ef4444' : '#38bdf8')}" />
             <!-- Needle pivot base -->
             <circle cx="125" cy="125" r="7" fill="#1e293b" stroke="#ffffff" stroke-width="2" />
@@ -1405,6 +1408,19 @@ HTML_PAGE = """<!DOCTYPE html>
         const c = data.capital;
         const sign = c.pnl_pct >= 0 ? "+" : "";
         document.getElementById("cap-current").innerHTML = `$${c.current.toFixed(2)} <small style="font-size:0.75rem">(${sign}${c.pnl_pct.toFixed(2)}%)</small>`;
+      }
+
+      // Update Remote Tunnel Link
+      const pillTunnel = document.getElementById("pill-tunnel");
+      const linkTunnel = document.getElementById("tunnel-link");
+      if (pillTunnel && linkTunnel) {
+        if (data.tunnel_url && data.tunnel_url.startsWith("http")) {
+          pillTunnel.style.display = "flex";
+          linkTunnel.href = data.tunnel_url;
+          linkTunnel.textContent = data.tunnel_url.replace("https://", "");
+        } else {
+          pillTunnel.style.display = "none";
+        }
       }
 
       // Render Cards

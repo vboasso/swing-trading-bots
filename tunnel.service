@@ -1,0 +1,17 @@
+[Unit]
+Description=Cloudflare Tunnel for Web Dashboard
+After=network.target dashboard.service
+Wants=dashboard.service
+
+[Service]
+Type=simple
+User=vale
+WorkingDirectory=/home/vale
+ExecStart=/bin/bash /home/vale/start_tunnel.sh
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
