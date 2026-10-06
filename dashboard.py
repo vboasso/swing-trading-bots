@@ -1391,7 +1391,9 @@ HTML_PAGE = """<!DOCTYPE html>
     spin.style.animation = "spin 0.6s linear";
 
     try {
-      const res = await fetch("/api/data");
+      const res = await fetch("/api/data", {
+        headers: { "ngrok-skip-browser-warning": "true" }
+      });
       if (!res.ok) throw new Error("HTTP error " + res.status);
       const data = await res.json();
 

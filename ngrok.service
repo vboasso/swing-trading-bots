@@ -1,0 +1,17 @@
+[Unit]
+Description=Ngrok Permanent Tunnel for Web Dashboard
+After=network.target dashboard.service
+Wants=dashboard.service
+
+[Service]
+Type=simple
+User=vale
+WorkingDirectory=/home/vale
+ExecStart=/usr/local/bin/ngrok http 5000 --url=https://apply-untitled-glory.ngrok-free.dev --log=stdout
+Restart=always
+RestartSec=10
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
