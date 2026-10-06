@@ -58,6 +58,63 @@ def read_entry_price(filepath):
         return 0.0
 
 
+_last_net_time = 0.0
+_last_net_rx = 0
+_last_net_tx = 0
+
+
+def get_network_stats():
+    global _last_net_time, _last_net_rx, _last_net_tx
+    net_info = {
+        "rx_speed": "0.0 KB/s",
+        "tx_speed": "0.0 KB/s",
+        "rx_total_mb": 0.0,
+        "tx_total_mb": 0.0,
+        "summary": "↓ 0.0 KB/s | ↑ 0.0 KB/s",
+    }
+    try:
+        if os.path.exists("/proc/net/dev"):
+            rx_bytes, tx_bytes = 0, 0
+            with open("/proc/net/dev", "r") as f:
+                for line in f.readlines()[2:]:
+                    parts = line.strip().split()
+                    if len(parts) >= 10:
+                        iface = parts[0].replace(":", "")
+                        if iface != "lo":
+                            rx_bytes += int(parts[1])
+                            tx_bytes += int(parts[9])
+
+            net_info["rx_total_mb"] = round(rx_bytes / (1024 * 1024), 1)
+            net_info["tx_total_mb"] = round(tx_bytes / (1024 * 1024), 1)
+
+            now = time.time()
+            if _last_net_time > 0:
+                dt = max(0.5, now - _last_net_time)
+                rx_rate = (rx_bytes - _last_net_rx) / dt
+                tx_rate = (tx_bytes - _last_net_tx) / dt
+
+                def format_bytes_rate(bps):
+                    if bps < 1024:
+                        return f"{bps:.0f} B/s"
+                    elif bps < 1024 * 1024:
+                        return f"{bps / 1024:.1f} KB/s"
+                    else:
+                        return f"{bps / (1024 * 1024):.2f} MB/s"
+
+                rx_s = format_bytes_rate(max(0, rx_rate))
+                tx_s = format_bytes_rate(max(0, tx_rate))
+                net_info["rx_speed"] = rx_s
+                net_info["tx_speed"] = tx_s
+                net_info["summary"] = f"↓ {rx_s} | ↑ {tx_s}"
+
+            _last_net_time = now
+            _last_net_rx = rx_bytes
+            _last_net_tx = tx_bytes
+    except Exception:
+        pass
+    return net_info
+
+
 def get_system_stats():
     res = {
         "uptime": "N/A",
@@ -65,6 +122,13 @@ def get_system_stats():
         "ram_total_mb": 0,
         "ram_used_mb": 0,
         "ram_pct": 0.0,
+        "net": {
+            "rx_speed": "0.0 KB/s",
+            "tx_speed": "0.0 KB/s",
+            "rx_total_mb": 0.0,
+            "tx_total_mb": 0.0,
+            "summary": "↓ 0.0 KB/s | ↑ 0.0 KB/s",
+        },
     }
     try:
         if hasattr(os, "getloadavg"):
@@ -104,6 +168,8 @@ def get_system_stats():
             res["ram_pct"] = round((used / total) * 100, 1) if total > 0 else 0.0
     except Exception:
         pass
+
+    res["net"] = get_network_stats()
 
     return res
 
@@ -1126,8 +1192,13 @@ HTML_PAGE = """<!DOCTYPE html>
         <span class="val" id="sys-load">-- | --</span>
       </div>
 
+      <div class="stat-pill" title="Tráfico de red en tiempo real">
+        <span class="label">Red / Tráfico</span>
+        <span class="val" id="sys-net" style="font-size:0.85rem">↓ 0.0 KB/s | ↑ 0.0 KB/s</span>
+      </div>
+
       <div class="stat-pill" id="pill-tunnel" style="display:none">
-        <span class="label">🌍 Remoto (Cloudflare)</span>
+        <span class="label">🌍 Remoto (Ngrok)</span>
         <span class="val" style="font-size:0.75rem"><a href="#" id="tunnel-link" target="_blank" style="color:var(--accent-blue);text-decoration:none">...</a></span>
       </div>
 
@@ -1403,6 +1474,15 @@ HTML_PAGE = """<!DOCTYPE html>
         document.getElementById("sys-ram").textContent = `${ram.ram_used_mb}MB / ${ram.ram_total_mb}MB (${ram.ram_pct}%)`;
         const load = data.system.load.join(", ");
         document.getElementById("sys-load").textContent = `L: ${load} | Up: ${data.system.uptime}`;
+
+        if (data.system.net) {
+          const net = data.system.net;
+          const netEl = document.getElementById("sys-net");
+          if (netEl) {
+            netEl.textContent = net.summary;
+            netEl.title = `Total acumulado: ↓ ${net.rx_total_mb} MB | ↑ ${net.tx_total_mb} MB`;
+          }
+        }
       }
 
       // Update Capital Stats
