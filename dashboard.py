@@ -1270,10 +1270,14 @@ class DashboardHandler(http.server.BaseHTTPRequestHandler):
         pass
 
 
+class ReusableThreadingServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
 def run_server():
     server_address = ("0.0.0.0", PORT)
-    httpd = socketserver.ThreadingTCPServer(server_address, DashboardHandler)
-    httpd.daemon_threads = True
+    httpd = ReusableThreadingServer(server_address, DashboardHandler)
     print(f"🚀 Netbook Trading Dashboard running at http://0.0.0.0:{PORT}...")
     try:
         httpd.serve_forever()
