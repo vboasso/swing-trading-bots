@@ -22,8 +22,8 @@ else:
     PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
-# Ensure the user has provided the contract address for RAVEN (BEP-20)
-RAVEN_ADDRESS = os.getenv("RAVEN_ADDRESS", "0xcBd7A10B45C49887532A1f0BEcb54A51f28b49E1") 
+# RAVEN contract address on BSC
+RAVEN_ADDRESS = os.getenv("RAVEN_ADDRESS", "0xcd7c5025753a49f1881b31c48caa7c517bb46308") 
 
 BSC_RPC = "https://bsc-dataseed.binance.org/"
 ROUTER_ADDRESS = "0x10ED43C718714eb63d5aA57B78B54704E256024E" # PancakeSwap V2
@@ -42,6 +42,39 @@ ROUTER_ABI = [
     {"inputs":[{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactETHForTokensSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"payable","type":"function"},
     {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForETHSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]
+
+_last_bnb_usd = 700.0
+_last_bnb_time = 0
+
+def get_bnb_usd():
+    global _last_bnb_usd, _last_bnb_time
+    now = time.time()
+    if now - _last_bnb_time > 45: # Cache for 45s to avoid spamming Binance API
+        try:
+            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=4).json()
+            _last_bnb_usd = float(r.get("price", _last_bnb_usd))
+            _last_bnb_time = now
+        except Exception:
+            pass
+    return _last_bnb_usd
+
+def fetch_onchain_spot_price():
+    """
+    Fetches real-time spot price of RAVEN in USD directly from PancakeSwap V2 Router on BSC.
+    Zero dependency on GeckoTerminal candles or Cloudflare rate limits.
+    """
+    try:
+        router = web3.eth.contract(address=web3.to_checksum_address(ROUTER_ADDRESS), abi=ROUTER_ABI)
+        out = router.functions.getAmountsOut(
+            10**18,
+            [web3.to_checksum_address(RAVEN_ADDRESS), web3.to_checksum_address(WBNB_ADDRESS)]
+        ).call()
+        bnb_per_raven = out[1] / (10**18)
+        bnb_usd = get_bnb_usd()
+        return bnb_per_raven * bnb_usd
+    except Exception as e:
+        logging.warning(f"Error fetching on-chain spot price: {e}")
+        return None
 
 def calculate_rsi(prices, period=14):
     if len(prices) < period + 1:
@@ -189,18 +222,14 @@ def execute_buy(current_price):
         raven_after = raven_contract.functions.balanceOf(account.address).call() / (10**18)
         tokens_received = raven_after - raven_before
         human_bnb = amount_to_buy / (10**18)
-        
-        try:
-            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=5).json()
-            bnb_usd = float(r.get("price", 600))
-        except Exception:
-            bnb_usd = 600.0
+        bnb_usd = get_bnb_usd()
             
         if tokens_received > 0:
             usd_spent = human_bnb * bnb_usd
             real_price = usd_spent / tokens_received
         else:
             real_price = current_price
+            usd_spent = human_bnb * bnb_usd
             
         logging.info(f"Real buy price: ${real_price:.8f} (Tokens: {tokens_received:,.2f})")
         send_telegram_message(
@@ -269,12 +298,7 @@ def execute_sell(current_price):
         bnb_after = web3.eth.get_balance(account.address) / (10**18)
         bnb_received = bnb_after - bnb_before
         human_raven = balance / (10**18)
-        
-        try:
-            r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=5).json()
-            bnb_usd = float(r.get("price", 600))
-        except Exception:
-            bnb_usd = 600.0
+        bnb_usd = get_bnb_usd()
             
         usd_received = bnb_received * bnb_usd
         real_sell_price = (usd_received / human_raven) if human_raven > 0 else current_price
@@ -307,8 +331,8 @@ def set_last_buy(price):
         pass
 
 def main():
-    logging.info("Starting RAVEN/BNB Swing Bot...")
-    send_telegram_message("🤖 *Bot Iniciado*\nEl bot de RAVEN ha arrancado correctamente...")
+    logging.info("Starting RAVEN/BNB Swing Bot with High-Frequency On-Chain Take-Profit...")
+    send_telegram_message("🤖 *Bot Iniciado*\nEl bot de RAVEN ha arrancado correctamente (Monitoreo On-Chain 15s activo)...")
     last_buy_price = get_last_buy()
     
     consecutive_errors = 0
@@ -357,6 +381,7 @@ def main():
                             if real_price:
                                 last_buy_price = real_price
                                 set_last_buy(last_buy_price)
+                                state = "WAITING_SELL"
                     else:
                         logging.info("Not enough BNB to buy.")
                 elif state == "WAITING_SELL":
@@ -367,14 +392,54 @@ def main():
                         if execute_sell(current_price):
                             last_buy_price = 0
                             set_last_buy(0)
+                            state = "WAITING_BUY"
                     elif rsi > 75:
                         logging.info(f"RSI > 75 but price is lower than buy price ({last_buy_price}). HODLing to prevent loss.")
             else:
                 logging.warning("Not enough data to calculate RSI yet.")
                 
             consecutive_errors = 0
-            consecutive_errors = 0
-            time.sleep(900) # Wait 15 minutes between checks
+            
+            # --- Interval & Fast On-Chain Monitoring Logic ---
+            if state == "WAITING_SELL":
+                logging.info("⚡ Holding RAVEN: Entering 15s high-frequency on-chain monitoring for +25% Take-Profit...")
+                start_cycle = time.time()
+                check_count = 0
+                while (time.time() - start_cycle) < 900:
+                    time.sleep(15)
+                    check_count += 1
+                    try:
+                        spot_price = fetch_onchain_spot_price()
+                        if spot_price and last_buy_price > 0:
+                            profit_pct = ((spot_price - last_buy_price) / last_buy_price) * 100
+                            
+                            # Log heartbeat every ~60 seconds (every 4 ticks)
+                            if check_count % 4 == 0:
+                                target_price = last_buy_price * 1.25
+                                logging.info(f"[On-Chain Monitor] Spot: ${spot_price:.8f} | Profit: {profit_pct:+.2f}% | Target +25%: ${target_price:.8f}")
+                            
+                            # Real-time Take Profit (+25%) Trigger
+                            if profit_pct >= 25:
+                                logging.info(f"🎯 TAKE PROFIT TRIGGERED ON-CHAIN! Spot: ${spot_price:.8f} | Profit: {profit_pct:.2f}% (Target: >=25%)")
+                                send_telegram_message(
+                                    f"⚡ *TAKE PROFIT DISPARADO EN TIEMPO REAL (+25%)*\n"
+                                    f"Mechazo detectado on-chain en PancakeSwap.\n"
+                                    f"🔹 Precio Spot: `${spot_price:.8f}`\n"
+                                    f"🔹 Precio de Compra: `${last_buy_price:.8f}`\n"
+                                    f"📈 Ganancia: `+{profit_pct:.2f}%`\n"
+                                    f"🚀 Ejecutando venta inmediata..."
+                                )
+                                if execute_sell(spot_price):
+                                    last_buy_price = 0
+                                    set_last_buy(0)
+                                    state = "WAITING_BUY"
+                                    break
+                    except Exception as e_fast:
+                        logging.warning(f"Warning in fast on-chain check: {e_fast}")
+            else:
+                # In WAITING_BUY, wait 15 minutes between candle & RSI evaluations
+                time.sleep(900)
+                
         except Exception as e:
             error_msg = str(e)
             consecutive_errors += 1
