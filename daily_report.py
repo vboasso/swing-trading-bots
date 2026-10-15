@@ -97,7 +97,7 @@ def fetch_data():
     try:
         price_bnb = exchange.fetch_ticker('BNB/USDT')['last']
     except:
-        price_bnb = 600.0  # Fallback
+        price_bnb = 700.0  # Fallback
 
     # --- RAVEN SECTION ---
     try:
@@ -113,15 +113,31 @@ def fetch_data():
         except Exception as e:
             pass
 
-        capital_raven = (balance_raven * price_raven) + (bnb_balance * price_bnb)
+        if price_raven == 0:
+            try:
+                # Fallback via PancakeSwap V2 Router on-chain
+                router_address = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
+                wbnb_address = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
+                router_abi = [{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"}],"name":"getAmountsOut","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"view","type":"function"}]
+                router = web3.eth.contract(address=web3.to_checksum_address(router_address), abi=router_abi)
+                out = router.functions.getAmountsOut(10**18, [web3.to_checksum_address(RAVEN_ADDRESS), web3.to_checksum_address(wbnb_address)]).call()
+                bnb_per_raven = out[1] / (10**18)
+                price_raven = bnb_per_raven * price_bnb
+            except Exception:
+                pass
+
+        val_raven_usd = balance_raven * price_raven
+        val_bnb_usd = bnb_balance * price_bnb
+
+        capital_raven = val_raven_usd + val_bnb_usd
         total_capital += capital_raven
 
         log_raven = get_last_log("ravenbot")
 
         msg += "🦅 *RAVEN BOT (PancakeSwap)*\n"
-        msg += f"🔹 RAVEN: `{balance_raven:,.2f}`\n"
-        msg += f"🔹 BNB: `{bnb_balance:.4f}`\n"
-        msg += f"📈 Precio RAVEN: `${price_raven:.6f}`\n"
+        msg += f"🔹 RAVEN: `{balance_raven:,.2f}` ({val_raven_usd:,.2f} USD)\n"
+        msg += f"🔹 BNB: `{bnb_balance:.4f}` ({val_bnb_usd:,.2f} USD)\n"
+        msg += f"📈 Precio RAVEN: `${price_raven:.8f}`\n"
         msg += f"📝 Estado: `{log_raven}`\n\n"
     except Exception as e:
         msg += f"🦅 *RAVEN BOT:* Error al cargar ({e})\n\n"
@@ -136,13 +152,14 @@ def fetch_data():
         ticker = exchange.fetch_ticker('PI/USDT')
         price_pi = ticker['last']
         
-        capital_pi = (pi_balance * price_pi) + usdt_balance
+        val_pi_usdt = pi_balance * price_pi
+        capital_pi = val_pi_usdt + usdt_balance
         total_capital += capital_pi
 
         log_pi = get_last_log("pibot")
         
         msg += "🟣 *PI BOT (Bitget)*\n"
-        msg += f"🔹 PI: `{pi_balance:,.2f}`\n"
+        msg += f"🔹 PI: `{pi_balance:,.2f}` ({val_pi_usdt:,.2f} USDT)\n"
         msg += f"🔹 USDT: `{usdt_balance:.2f}`\n"
         msg += f"📈 Precio PI: `${price_pi:.4f}`\n"
         msg += f"📝 Estado: `{log_pi}`\n\n"
