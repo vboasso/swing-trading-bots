@@ -220,7 +220,16 @@ def get_all_bot_data():
                 pi_data["quote_balance"] = safe_float(last[5])
 
                 if pi_data["state"] == "WAITING_SELL":
-                    pi_data["state_label"] = "En Posición (Esperando Venta)"
+                    pi_tranche_label = ""
+                    pi_state_file = os.path.join(BASE_DIR, ".pi_state.json")
+                    if os.path.exists(pi_state_file):
+                        try:
+                            with open(pi_state_file) as pf:
+                                pst = json.load(pf)
+                                pi_tranche_label = f" [Tramo {pst.get('tranches_filled', 1)}/2]"
+                        except Exception:
+                            pass
+                    pi_data["state_label"] = f"En Posición (Esperando Venta){pi_tranche_label}"
                     if pi_entry > 0 and pi_data["price"] > 0:
                         pi_data["pnl_pct"] = round(((pi_data["price"] - pi_entry) / pi_entry) * 100, 2)
                 elif pi_data["state"] == "WAITING_BUY":
@@ -280,7 +289,16 @@ def get_all_bot_data():
                 raven_data["quote_balance"] = safe_float(last[5])
 
                 if raven_data["state"] == "WAITING_SELL":
-                    raven_data["state_label"] = "En Posición (Esperando Venta)"
+                    raven_tranche_label = ""
+                    raven_state_file = os.path.join(BASE_DIR, ".raven_state.json")
+                    if os.path.exists(raven_state_file):
+                        try:
+                            with open(raven_state_file) as rf:
+                                rst = json.load(rf)
+                                raven_tranche_label = f" [Tramo {rst.get('tranches_filled', 1)}/2]"
+                        except Exception:
+                            pass
+                    raven_data["state_label"] = f"En Posición (Esperando Venta){raven_tranche_label}"
                     if raven_entry > 0 and raven_data["price"] > 0:
                         raven_data["pnl_pct"] = round(((raven_data["price"] - raven_entry) / raven_entry) * 100, 2)
                 elif raven_data["state"] == "WAITING_BUY":
@@ -357,6 +375,9 @@ def get_all_bot_data():
     # Populate from state json if present
     if "SUI/USDT" in paper_state_data:
         s_info = paper_state_data["SUI/USDT"]
+        sui_mode = s_info.get("mode", "PAPER")
+        sui_data["mode"] = sui_mode
+        sui_data["exchange"] = "Bitget Spot" if sui_mode == "REAL" else "Bitget (Sim)"
         sui_data["state"] = s_info.get("state", "WAITING_BUY")
         sui_data["token_balance"] = safe_float(s_info.get("token_balance", 0.0))
         sui_data["quote_balance"] = safe_float(s_info.get("usdt_balance", 200.0))
@@ -368,6 +389,9 @@ def get_all_bot_data():
 
     if "PEPE/USDT" in paper_state_data:
         p_info = paper_state_data["PEPE/USDT"]
+        pepe_mode = p_info.get("mode", "PAPER")
+        pepe_data["mode"] = pepe_mode
+        pepe_data["exchange"] = "Bitget Spot" if pepe_mode == "REAL" else "Bitget (Sim)"
         pepe_data["state"] = p_info.get("state", "WAITING_BUY")
         pepe_data["token_balance"] = safe_float(p_info.get("token_balance", 0.0))
         pepe_data["quote_balance"] = safe_float(p_info.get("usdt_balance", 200.0))
@@ -396,7 +420,8 @@ def get_all_bot_data():
                     sui_data["price_formatted"] = f"${p_val:.4f}"
                     sui_data["rsi"] = r_val
                     sui_data["state"] = st_val
-                    sui_data["state_label"] = "En Posición (Esperando Venta)" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+                    s_tr = paper_state_data.get("SUI/USDT", {}).get("tranches_filled", 1)
+                    sui_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {s_tr}/3]" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
                     if st_val == "WAITING_SELL" and sui_data["buy_price"] > 0:
                         sui_data["pnl_pct"] = round(((p_val - sui_data["buy_price"]) / sui_data["buy_price"]) * 100, 2)
                     sui_data["history"].append({
@@ -412,7 +437,8 @@ def get_all_bot_data():
                     pepe_data["price_formatted"] = f"${p_val:.8f}"
                     pepe_data["rsi"] = r_val
                     pepe_data["state"] = st_val
-                    pepe_data["state_label"] = "En Posición (Esperando Venta)" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+                    p_tr = paper_state_data.get("PEPE/USDT", {}).get("tranches_filled", 1)
+                    pepe_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {p_tr}/3]" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
                     if st_val == "WAITING_SELL" and pepe_data["buy_price"] > 0:
                         pepe_data["pnl_pct"] = round(((p_val - pepe_data["buy_price"]) / pepe_data["buy_price"]) * 100, 2)
                     pepe_data["history"].append({

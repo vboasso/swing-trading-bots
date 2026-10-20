@@ -1,8 +1,9 @@
 import os
 import time
+import json
 import requests
 import csv
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 import ccxt
 from dotenv import load_dotenv
@@ -12,6 +13,11 @@ load_dotenv('/home/vale/.env')
 
 TELEGRAM_TOKEN = "8864696569:AAH77c3tRbpYpDdaccF2q_pVtwf6pXy1U5A"
 TELEGRAM_CHAT_ID = "305025287"
+
+STATE_FILE = "/home/vale/.pi_state.json"
+BUY_PRICE_FILE = "/home/vale/.pi_buy_price"
+CSV_FILE = "/home/vale/pibot_history.csv"
+SYMBOL = "PI/USDT"
 
 def send_telegram_message(text):
     try:
@@ -48,23 +54,50 @@ def calculate_rsi(prices, period=14):
     rsi = 100 - (100 / (1 + rs))
     return rsi
 
-def get_last_buy():
-    try:
-        with open("/home/vale/.pi_buy_price", "r") as f:
-            return float(f.read().strip())
-    except:
-        return 0.0
+def load_state():
+    # Backward compatibility with .pi_buy_price
+    legacy_price = 0.0
+    if os.path.exists(BUY_PRICE_FILE):
+        try:
+            with open(BUY_PRICE_FILE, "r") as f:
+                legacy_price = float(f.read().strip())
+        except Exception:
+            pass
 
-def set_last_buy(price):
+    state = {
+        "buy_price": legacy_price,
+        "buy_time": "2026-10-02 18:26:15" if legacy_price > 0 else None,
+        "tranches_filled": 1 if legacy_price > 0 else 0,
+        "max_pnl_seen": 0.0,
+        "trailing_stop_pnl": None
+    }
+    
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                saved = json.load(f)
+                state.update(saved)
+        except Exception as e:
+            logging.error(f"Error loading {STATE_FILE}: {e}")
+            
+    return state
+
+def save_state(state):
     try:
-        with open("/home/vale/.pi_buy_price", "w") as f:
-            f.write(str(price))
-    except:
-        pass
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        # Keep .pi_buy_price updated for dashboard & daily_report
+        with open(BUY_PRICE_FILE, "w") as f:
+            f.write(str(state.get("buy_price", 0.0)))
+    except Exception as e:
+        logging.error(f"Error saving state: {e}")
 
 def main():
-    logging.info("Starting PI/USDT Swing Bot...")
-    send_telegram_message("🤖 *Pi Bot Iniciado*\nEl bot gemelo de PI ha arrancado correctamente...")
+    logging.info("Starting PI/USDT Swing Bot (Enhanced Engine with 2-Tranche DCA & Dynamic Trailing TP)...")
+    send_telegram_message("🤖 *Pi Bot Iniciado (Motor Optimizado)*\n"
+                          "🔹 Entradas escalonadas (DCA 2 tramos)\n"
+                          "🔹 Take-Profit dinámico (+8% objetivo, trailing stop desde +5%)\n"
+                          "🔹 Salida por estancamiento técnico activada (>7 días)")
     
     exchange = ccxt.bitget({
         'apiKey': os.getenv('BITGET_API_KEY'),
@@ -73,10 +106,9 @@ def main():
         'enableRateLimit': True,
     })
     
-    symbol = 'PI/USDT'
-    last_buy_price = get_last_buy()
-    
+    state_data = load_state()
     consecutive_errors = 0
+    
     while True:
         try:
             # 1. Fetch Balances
@@ -86,23 +118,36 @@ def main():
             
             # 2. Determine State
             state = "WAITING_BUY"
-            if pi_balance > 10: # If we have more than 10 PI, we want to sell
+            if pi_balance > 10: # If we have more than 10 PI, we are in position
                 state = "WAITING_SELL"
+            else:
+                if state_data["buy_price"] > 0 and state_data["tranches_filled"] > 0:
+                    # Reset state if balance is zero
+                    state_data = {
+                        "buy_price": 0.0,
+                        "buy_time": None,
+                        "tranches_filled": 0,
+                        "max_pnl_seen": 0.0,
+                        "trailing_stop_pnl": None
+                    }
+                    save_state(state_data)
                 
             # 3. Fetch OHLCV directly from Bitget
-            ohlcv = exchange.fetch_ohlcv(symbol, '30m', limit=20)
+            ohlcv = exchange.fetch_ohlcv(SYMBOL, '30m', limit=20)
             closes = [x[4] for x in ohlcv]
             
             if len(closes) > 15:
                 rsi = calculate_rsi(closes)
                 current_price = closes[-1]
-                logging.info(f"Price: {current_price:.4f} | RSI: {rsi:.2f} | State: {state} | PI: {pi_balance:.2f} | USDT: {usdt_balance:.2f}")
+                buy_price = state_data.get("buy_price", 0.0)
+                profit_pct = ((current_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0.0
+                
+                logging.info(f"PI: ${current_price:.4f} | RSI: {rsi:.2f} | State: {state} (Tranches: {state_data.get('tranches_filled', 0)}/2) | PnL: {profit_pct:+.2f}% | PI: {pi_balance:.2f} | USDT: {usdt_balance:.2f}")
                 
                 # Log to CSV
-                csv_file = "/home/vale/pibot_history.csv"
-                file_exists = os.path.isfile(csv_file)
+                file_exists = os.path.isfile(CSV_FILE)
                 try:
-                    with open(csv_file, mode='a', newline='') as f:
+                    with open(CSV_FILE, mode='a', newline='') as f:
                         writer = csv.writer(f)
                         if not file_exists:
                             writer.writerow(['timestamp', 'price', 'rsi', 'state', 'pi_balance', 'usdt_balance'])
@@ -111,78 +156,191 @@ def main():
                     logging.error(f"Error CSV: {e}")
                 
                 # 4. Execute Logic
+                
+                # --- WAITING_BUY / TRANCHE 1 ---
                 if state == "WAITING_BUY":
-                    if usdt_balance > 5: # Minimum $5 to trade
-                        if rsi < 25:
-                            logging.info("RSI below 25. Executing Buy...")
+                    if usdt_balance > 5:
+                        # Relaxed RSI threshold to 28 (from 25) for initial entry
+                        if rsi < 28:
+                            logging.info("RSI below 28. Executing Tranche 1 Buy (50% of USDT)...")
                             try:
-                                # Buy using 98% of USDT to account for fees/slippage
-                                limit_price = float(exchange.price_to_precision(symbol, current_price * 1.02))
-                                amount_to_buy = (usdt_balance * 0.98) / limit_price
-                                amount_to_buy = float(exchange.amount_to_precision(symbol, amount_to_buy))
-                                order = exchange.create_limit_buy_order(symbol, amount_to_buy, limit_price)
+                                # Spend 50% of available USDT for Tranche 1 (or 100% if balance is small < $15)
+                                usdt_to_spend = (usdt_balance * 0.50) if usdt_balance >= 15 else (usdt_balance * 0.98)
+                                limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 1.02))
+                                amount_to_buy = (usdt_to_spend * 0.98) / limit_price
+                                amount_to_buy = float(exchange.amount_to_precision(SYMBOL, amount_to_buy))
+                                
+                                order = exchange.create_limit_buy_order(SYMBOL, amount_to_buy, limit_price)
                                 time.sleep(2)
                                 try:
-                                    order_info = exchange.fetch_order(order['id'], symbol)
-                                    real_price = order_info.get('average') or order_info.get('price') or current_price
+                                    order_info = exchange.fetch_order(order['id'], SYMBOL)
+                                    real_price = float(order_info.get('average') or order_info.get('price') or current_price)
                                 except Exception:
-                                    real_price = order.get('average') or order.get('price') or current_price
-                                last_buy_price = float(real_price)
-                                set_last_buy(last_buy_price)
-                                logging.info(f"Buy Order Success: {order['id']} at real price: {last_buy_price}")
-                                send_telegram_message(f"🟢 *COMPRA DE PI EJECUTADA*\nSe compraron tokens PI a un precio real promedio de `${last_buy_price:.4f}`.")
+                                    real_price = float(order.get('average') or order.get('price') or current_price)
+                                
+                                state_data["buy_price"] = real_price
+                                state_data["buy_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                state_data["tranches_filled"] = 1
+                                state_data["max_pnl_seen"] = 0.0
+                                state_data["trailing_stop_pnl"] = None
+                                save_state(state_data)
+                                
+                                logging.info(f"Tranche 1 Buy Success: {order['id']} at price: ${real_price:.4f}")
+                                send_telegram_message(
+                                    f"🟢 *COMPRA PI (Tramo 1/2 EJECUTADO)*\n"
+                                    f"🔹 Inversión: `${usdt_to_spend:.2f} USDT`\n"
+                                    f"🔹 Tokens comprados: `{amount_to_buy:,.2f} PI`\n"
+                                    f"🔹 Precio de entrada: `${real_price:.4f}`\n"
+                                    f"🔹 RSI: `{rsi:.2f}`\n"
+                                    f"🎯 Objetivo: `+8.0%` con Trailing Stop activo."
+                                )
                             except Exception as e:
-                                logging.error(f"Buy Error: {e}")
-                                send_telegram_message(f"❌ *ERROR DE COMPRA PI*\nDetalle: `{e}`")
-                    else:
-                        logging.info("Not enough USDT to buy.")
-                        
+                                logging.error(f"Buy Tranche 1 Error: {e}")
+                                send_telegram_message(f"❌ *ERROR DE COMPRA PI (Tramo 1)*\nDetalle: `{e}`")
+                                
+                # --- WAITING_SELL / TRANCHE 2 & EXITS ---
                 elif state == "WAITING_SELL":
-                    profit_pct = ((current_price - last_buy_price) / last_buy_price) * 100 if last_buy_price > 0 else 0
-                    
-                    if profit_pct >= 25 or (rsi > 75 and (last_buy_price == 0 or current_price > last_buy_price)):
-                        logging.info(f"Sell condition met. Profit: {profit_pct:.2f}% | RSI: {rsi:.2f}")
+                    # Check if Tranche 2 should be executed (DCA scale-in)
+                    tranches = state_data.get("tranches_filled", 1)
+                    if tranches < 2 and usdt_balance >= 5:
+                        # Trigger Tranche 2 if price dipped >= 4.5% below initial entry OR RSI < 25 again
+                        if (profit_pct <= -4.5 and rsi < 35) or rsi < 25:
+                            logging.info(f"DCA condition met for Tranche 2. PnL: {profit_pct:.2f}% | RSI: {rsi:.2f}. Executing Buy...")
+                            try:
+                                usdt_to_spend = usdt_balance * 0.98
+                                limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 1.02))
+                                amount_to_buy = usdt_to_spend / limit_price
+                                amount_to_buy = float(exchange.amount_to_precision(SYMBOL, amount_to_buy))
+                                
+                                order = exchange.create_limit_buy_order(SYMBOL, amount_to_buy, limit_price)
+                                time.sleep(2)
+                                try:
+                                    order_info = exchange.fetch_order(order['id'], SYMBOL)
+                                    real_price = float(order_info.get('average') or order_info.get('price') or current_price)
+                                except Exception:
+                                    real_price = float(order.get('average') or order.get('price') or current_price)
+                                    
+                                # Recalculate weighted average buy price
+                                old_price = state_data.get("buy_price", real_price)
+                                total_tokens = pi_balance + amount_to_buy
+                                if total_tokens > 0:
+                                    new_avg_price = ((pi_balance * old_price) + (amount_to_buy * real_price)) / total_tokens
+                                else:
+                                    new_avg_price = real_price
+                                    
+                                state_data["buy_price"] = new_avg_price
+                                state_data["tranches_filled"] = 2
+                                save_state(state_data)
+                                
+                                logging.info(f"Tranche 2 Buy Success: {order['id']} at price: ${real_price:.4f}. New Avg: ${new_avg_price:.4f}")
+                                send_telegram_message(
+                                    f"🟢 *COMPRA PI (Tramo 2/2 DCA EJECUTADO)*\n"
+                                    f"🔹 Inversión: `${usdt_to_spend:.2f} USDT`\n"
+                                    f"🔹 Tokens agregados: `{amount_to_buy:,.2f} PI`\n"
+                                    f"🔹 Precio nuevo tramo: `${real_price:.4f}`\n"
+                                    f"📊 *Precio Promedio Ponderado:* `${new_avg_price:.4f}`\n"
+                                    f"🔹 Reducción de coste: `{((new_avg_price - old_price)/old_price)*100:+.2f}%`"
+                                )
+                                # Recalculate profit_pct with new average price
+                                profit_pct = ((current_price - new_avg_price) / new_avg_price) * 100
+                            except Exception as e:
+                                logging.error(f"Buy Tranche 2 Error: {e}")
+                                
+                    # Update Trailing Stop high-water mark
+                    if profit_pct > state_data.get("max_pnl_seen", 0.0):
+                        state_data["max_pnl_seen"] = profit_pct
+                        # Activate trailing stop when profit crosses +5.0%
+                        if profit_pct >= 5.0:
+                            state_data["trailing_stop_pnl"] = max(state_data.get("trailing_stop_pnl") or 0.0, profit_pct - 2.5)
+                        save_state(state_data)
+
+                    # Determine Holding Time for Stagnation Exit
+                    days_held = 0
+                    if state_data.get("buy_time"):
                         try:
-                            pi_balance = float(exchange.amount_to_precision(symbol, pi_balance))
-                            limit_price = float(exchange.price_to_precision(symbol, current_price * 0.98))
-                            order = exchange.create_limit_sell_order(symbol, pi_balance, limit_price)
+                            b_date = datetime.strptime(state_data["buy_time"].split(".")[0], "%Y-%m-%d %H:%M:%S")
+                            days_held = (datetime.now() - b_date).total_seconds() / 86400.0
+                        except Exception:
+                            days_held = 0
+
+                    # --- EVALUATE EXIT CONDITIONS ---
+                    sell_reason = None
+                    
+                    # Rule 1: Fixed Take-Profit reached (+8.0%)
+                    if profit_pct >= 8.0:
+                        sell_reason = f"Target de ganancia alcanzado (+{profit_pct:.2f}% >= +8.0%)"
+                        
+                    # Rule 2: Dynamic Trailing Stop Triggered
+                    elif state_data.get("trailing_stop_pnl") is not None and profit_pct <= state_data["trailing_stop_pnl"]:
+                        sell_reason = f"Trailing Stop Activado (+{profit_pct:.2f}%, pico fue +{state_data['max_pnl_seen']:.2f}%)"
+                        
+                    # Rule 3: Technical Overbought Exit (RSI >= 70 and in positive profit > 1.5%)
+                    elif rsi >= 70 and profit_pct >= 1.5:
+                        sell_reason = f"Sobrecompra Técnica (RSI {rsi:.2f} >= 70 y PnL positivo +{profit_pct:.2f}%)"
+                        
+                    # Rule 4: Stagnation / Time-Stop Exit (> 7 days held and technical bounce near breakeven >= -2.0% with RSI >= 65)
+                    elif days_held >= 7.0 and rsi >= 65 and profit_pct >= -2.0:
+                        sell_reason = f"Salida por Estancamiento ({days_held:.1f} días retenido, RSI {rsi:.2f} >= 65 en rebote técnico)"
+                        
+                    if sell_reason:
+                        logging.info(f"Sell condition met: {sell_reason}")
+                        try:
+                            pi_balance = float(exchange.amount_to_precision(SYMBOL, pi_balance))
+                            limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 0.98))
+                            order = exchange.create_limit_sell_order(SYMBOL, pi_balance, limit_price)
                             time.sleep(2)
                             try:
-                                order_info = exchange.fetch_order(order['id'], symbol)
+                                order_info = exchange.fetch_order(order['id'], SYMBOL)
                                 real_sell_price = order_info.get('average') or order_info.get('price') or current_price
                             except Exception:
                                 real_sell_price = order.get('average') or order.get('price') or current_price
-                            last_buy_price = 0
-                            set_last_buy(0)
+                                
+                            real_pnl_usd = (float(real_sell_price) - buy_price) * pi_balance
+                            
+                            # Reset state
+                            state_data = {
+                                "buy_price": 0.0,
+                                "buy_time": None,
+                                "tranches_filled": 0,
+                                "max_pnl_seen": 0.0,
+                                "trailing_stop_pnl": None
+                            }
+                            save_state(state_data)
+                            
                             logging.info(f"Sell Order Success: {order['id']} at real price: {real_sell_price}")
-                            send_telegram_message(f"🔴 *VENTA DE PI EJECUTADA*\nSe vendieron {pi_balance:.2f} PI por USDT a un precio real de `${float(real_sell_price):.4f}`.\n📈 Rendimiento estimado: `{profit_pct:.2f}%`")
+                            send_telegram_message(
+                                f"🔴 *VENTA DE PI EJECUTADA*\n"
+                                f"🔹 Tokens vendidos: `{pi_balance:,.2f} PI`\n"
+                                f"🔹 Precio de venta: `${float(real_sell_price):.4f}`\n"
+                                f"🔹 Motivo: `{sell_reason}`\n"
+                                f"📈 *Rendimiento:* `{profit_pct:+.2f}%`\n"
+                                f"💵 PnL neto estimado: `${real_pnl_usd:+.2f} USDT`\n"
+                                f"⏱ Días de retención: `{days_held:.1f} días`"
+                            )
                         except Exception as e:
                             logging.error(f"Sell Error: {e}")
                             send_telegram_message(f"❌ *ERROR DE VENTA PI*\nDetalle: `{e}`")
-                    elif rsi > 75:
-                        logging.info(f"RSI > 75 but price is lower than buy price ({last_buy_price}). HODLing to prevent loss.")
+                    else:
+                        if rsi >= 70:
+                            logging.info(f"RSI {rsi:.2f} >= 70 but PnL ({profit_pct:+.2f}%) below trigger. HODLing (Held: {days_held:.1f}d).")
             else:
                 logging.warning("Not enough data to calculate RSI.")
                 
-            consecutive_errors = 0
             consecutive_errors = 0
             time.sleep(900) # Wait 15 minutes between checks
             
         except Exception as e:
             error_msg = str(e)
             consecutive_errors += 1
-            
             retry_delays = [2, 10, 60]
-            
             if consecutive_errors == len(retry_delays) + 1:
-                logging.error(f"Error persistente in main loop: {error_msg}")
-                send_telegram_message(f"⚠️ *ALERTA (PI BOT)* ⚠️\nSe detectó un problema de red persistente:\n`{error_msg}`")
+                logging.error(f"Persistent error in PI loop: {error_msg}")
+                send_telegram_message(f"⚠️ *ALERTA (PI BOT)* ⚠️\n`{error_msg}`")
                 time.sleep(60)
             elif consecutive_errors > len(retry_delays) + 1:
                 time.sleep(60)
             else:
                 delay = retry_delays[consecutive_errors - 1]
-                logging.warning(f"Micro-corte de red detectado (intento {consecutive_errors}). Reintentando en {delay} segundos...")
                 time.sleep(delay)
 
 if __name__ == "__main__":

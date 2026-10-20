@@ -1,5 +1,6 @@
 import os
 import time
+import json
 import requests
 import csv
 from datetime import datetime
@@ -8,8 +9,7 @@ from web3 import Web3
 from dotenv import load_dotenv
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-
-load_dotenv()
+load_dotenv('/home/vale/.env')
 
 from eth_account import Account
 Account.enable_unaudited_hdwallet_features()
@@ -22,7 +22,6 @@ else:
     PRIVATE_KEY = os.getenv("PRIVATE_KEY")
 
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
-# RAVEN contract address on BSC
 RAVEN_ADDRESS = os.getenv("RAVEN_ADDRESS", "0xcd7c5025753a49f1881b31c48caa7c517bb46308") 
 
 BSC_RPC = "https://bsc-dataseed.binance.org/"
@@ -43,13 +42,16 @@ ROUTER_ABI = [
     {"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"uint256","name":"amountOutMin","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"},{"internalType":"address","name":"to","type":"address"},{"internalType":"uint256","name":"deadline","type":"uint256"}],"name":"swapExactTokensForETHSupportingFeeOnTransferTokens","outputs":[],"stateMutability":"nonpayable","type":"function"}
 ]
 
-_last_bnb_usd = 700.0
+STATE_FILE = "/home/vale/.raven_state.json"
+BUY_PRICE_FILE = "/home/vale/.raven_buy_price"
+
+_last_bnb_usd = 740.0
 _last_bnb_time = 0
 
 def get_bnb_usd():
     global _last_bnb_usd, _last_bnb_time
     now = time.time()
-    if now - _last_bnb_time > 45: # Cache for 45s to avoid spamming Binance API
+    if now - _last_bnb_time > 45:
         try:
             r = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BNBUSDT", timeout=4).json()
             _last_bnb_usd = float(r.get("price", _last_bnb_usd))
@@ -59,10 +61,6 @@ def get_bnb_usd():
     return _last_bnb_usd
 
 def fetch_onchain_spot_price():
-    """
-    Fetches real-time spot price of RAVEN in USD directly from PancakeSwap V2 Router on BSC.
-    Zero dependency on GeckoTerminal candles or Cloudflare rate limits.
-    """
     try:
         router = web3.eth.contract(address=web3.to_checksum_address(ROUTER_ADDRESS), abi=ROUTER_ABI)
         out = router.functions.getAmountsOut(
@@ -90,11 +88,9 @@ def calculate_rsi(prices, period=14):
             gains.append(0)
             losses.append(abs(change))
     
-    # Simple Moving Average for first calculation
     avg_gain = sum(gains[:period]) / period
     avg_loss = sum(losses[:period]) / period
     
-    # Smoothed for the rest
     for i in range(period, len(prices)-1):
         avg_gain = (avg_gain * (period - 1) + gains[i]) / period
         avg_loss = (avg_loss * (period - 1) + losses[i]) / period
@@ -107,24 +103,16 @@ def calculate_rsi(prices, period=14):
 
 def fetch_dex_prices():
     try:
-        # Use GeckoTerminal to fetch exact DEX prices (15 min aggregates)
         url = "https://api.geckoterminal.com/api/v2/networks/bsc/pools/0x547037d9d7ac11cb2740727a7f4ca41111d7e608/ohlcv/minute?aggregate=15&limit=25"
         response = requests.get(url, timeout=10)
         data = response.json()
-        
-        # Structure: {"data": {"attributes": {"ohlcv_list": [[time, open, high, low, close, volume], ...]}}}
         ohlcv_list = data.get("data", {}).get("attributes", {}).get("ohlcv_list", [])
-        
-        # GeckoTerminal returns newest first. We need oldest first for RSI.
         closes = [item[4] for item in ohlcv_list]
         closes.reverse()
-        
-        # If low volume causes missing candles, pad with the last known price to keep RSI stable
         if len(closes) > 0 and len(closes) < 16:
             last_price = closes[-1]
             while len(closes) < 16:
                 closes.append(last_price)
-                
         return closes
     except Exception as e:
         logging.error(f"Error fetching DEX prices: {e}")
@@ -134,31 +122,23 @@ def fetch_and_log_macro():
     macro_file = "/home/vale/macro_history.csv"
     file_exists = os.path.isfile(macro_file)
     btc_price, btc_dominance, fng_value = 0, 0, 0
-    
-    # 1. BTC Price via Binance (More reliable, no Cloudflare blocks)
     try:
         r1 = requests.get("https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT", timeout=5)
         btc_price = float(r1.json().get("price", 0))
-    except Exception as e:
-        logging.warning(f"Macro Warning (BTC): {e}")
-        
-    # 2. BTC Dominance via CoinGecko (May get 403, so handle softly)
+    except Exception:
+        pass
     try:
         r2 = requests.get("https://api.coingecko.com/api/v3/global", timeout=5)
         if r2.status_code == 200:
             btc_dominance = r2.json().get("data", {}).get("market_cap_percentage", {}).get("btc", 0)
-    except Exception as e:
-        pass # Ignore CG errors to prevent spam
-        
-    # 3. Fear & Greed Index
+    except Exception:
+        pass
     try:
         r3 = requests.get("https://api.alternative.me/fng/", timeout=5)
         if r3.status_code == 200:
             fng_value = int(r3.json().get("data", [{}])[0].get("value", 0))
-    except Exception as e:
-        logging.warning(f"Macro Warning (FnG): {e}")
-        
-    # Write to CSV
+    except Exception:
+        pass
     try:
         with open(macro_file, mode='a', newline='') as f:
             writer = csv.writer(f)
@@ -179,28 +159,67 @@ def send_telegram_message(text):
     except Exception as e:
         logging.error(f"Telegram error: {e}")
 
-def execute_buy(current_price):
+def load_state():
+    legacy_price = 0.0
+    if os.path.exists(BUY_PRICE_FILE):
+        try:
+            with open(BUY_PRICE_FILE, "r") as f:
+                legacy_price = float(f.read().strip())
+        except Exception:
+            pass
+
+    state = {
+        "buy_price": legacy_price,
+        "buy_time": None,
+        "tranches_filled": 1 if legacy_price > 0 else 0,
+        "max_pnl_seen": 0.0,
+        "trailing_stop_pnl": None,
+        "total_bnb_spent": 0.0
+    }
+    if os.path.exists(STATE_FILE):
+        try:
+            with open(STATE_FILE, "r") as f:
+                saved = json.load(f)
+                state.update(saved)
+        except Exception as e:
+            logging.error(f"Error loading {STATE_FILE}: {e}")
+    return state
+
+def save_state(state):
+    try:
+        with open(STATE_FILE, "w") as f:
+            json.dump(state, f, indent=2)
+        with open(BUY_PRICE_FILE, "w") as f:
+            f.write(str(state.get("buy_price", 0.0)))
+    except Exception as e:
+        logging.error(f"Error saving state: {e}")
+
+def execute_buy(current_price, pct_of_balance=0.60, tranche_idx=1):
     if not PRIVATE_KEY or not WALLET_ADDRESS:
         logging.error("Missing credentials in .env")
-        return None
-    logging.info("Executing BUY (BNB -> RAVEN)")
+        return None, 0.0, 0.0
+    logging.info(f"Executing BUY (BNB -> RAVEN) - Tranche {tranche_idx}")
     try:
         router = web3.eth.contract(address=web3.to_checksum_address(ROUTER_ADDRESS), abi=ROUTER_ABI)
         account = web3.eth.account.from_key(PRIVATE_KEY)
         raven_contract = web3.eth.contract(address=web3.to_checksum_address(RAVEN_ADDRESS), abi=ERC20_ABI)
         
         balance = web3.eth.get_balance(account.address)
-        if balance == 0:
-            logging.info("No BNB to buy.")
-            return None
+        gas_reserve = web3.to_wei(0.015, 'ether') # 0.015 BNB kept for gas
+        
+        if balance <= gas_reserve:
+            logging.info("Not enough BNB above gas reserve to buy.")
+            return None, 0.0, 0.0
+            
+        tradeable_bnb = balance - gas_reserve
+        amount_to_buy = int(tradeable_bnb * pct_of_balance)
+        if amount_to_buy <= 0:
+            return None, 0.0, 0.0
             
         raven_before = raven_contract.functions.balanceOf(account.address).call() / (10**18)
-            
-        # Use 90% of available BNB to keep enough for gas fees
-        amount_to_buy = int(balance * 0.9)
         
         tx = router.functions.swapExactETHForTokensSupportingFeeOnTransferTokens(
-            0, # Accept any amount of tokens (slippage protection can be added here)
+            0,
             [web3.to_checksum_address(WBNB_ADDRESS), web3.to_checksum_address(RAVEN_ADDRESS)],
             account.address,
             int(time.time()) + 600
@@ -231,24 +250,24 @@ def execute_buy(current_price):
             real_price = current_price
             usd_spent = human_bnb * bnb_usd
             
-        logging.info(f"Real buy price: ${real_price:.8f} (Tokens: {tokens_received:,.2f})")
+        logging.info(f"Real buy price Tranche {tranche_idx}: ${real_price:.8f} (Tokens: {tokens_received:,.2f})")
         send_telegram_message(
-            f"🟢 *COMPRA DE RAVEN EJECUTADA*\n"
+            f"🟢 *COMPRA DE RAVEN EJECUTADA (Tramo {tranche_idx}/2)*\n"
             f"🔹 Inversión: `{human_bnb:.4f} BNB` (${usd_spent:.2f} USD)\n"
             f"🔹 Recibidos: `{tokens_received:,.2f} RAVEN`\n"
-            f"📈 *Precio real promedio:* `${real_price:.8f}`\n"
+            f"📈 *Precio real tramo:* `${real_price:.8f}`\n"
             f"🔗 Hash: `{web3.to_hex(tx_hash)}`"
         )
-        return real_price
+        return real_price, tokens_received, human_bnb
     except Exception as e:
         logging.error(f"Buy execution failed: {e}")
-        send_telegram_message(f"❌ *ERROR DE COMPRA*\nDetalle: `{e}`")
-        return None
+        send_telegram_message(f"❌ *ERROR DE COMPRA RAVEN*\nDetalle: `{e}`")
+        return None, 0.0, 0.0
 
-def execute_sell(current_price):
+def execute_sell(current_price, reason="Take Profit"):
     if not PRIVATE_KEY or not WALLET_ADDRESS:
         return False
-    logging.info("Executing SELL (RAVEN -> BNB)")
+    logging.info(f"Executing SELL (RAVEN -> BNB) | Reason: {reason}")
     try:
         raven_contract = web3.eth.contract(address=web3.to_checksum_address(RAVEN_ADDRESS), abi=ERC20_ABI)
         router = web3.eth.contract(address=web3.to_checksum_address(ROUTER_ADDRESS), abi=ROUTER_ABI)
@@ -261,7 +280,6 @@ def execute_sell(current_price):
             
         bnb_before = web3.eth.get_balance(account.address) / (10**18)
 
-        # Check allowance
         allowance = raven_contract.functions.allowance(account.address, web3.to_checksum_address(ROUTER_ADDRESS)).call()
         if allowance < balance:
             logging.info("Approving Router to spend RAVEN...")
@@ -273,7 +291,7 @@ def execute_sell(current_price):
             })
             signed_approve = web3.eth.account.sign_transaction(approve_tx, PRIVATE_KEY)
             web3.eth.send_raw_transaction(signed_approve.raw_transaction)
-            time.sleep(10) # Wait for confirmation
+            time.sleep(10)
             
         tx = router.functions.swapExactTokensForETHSupportingFeeOnTransferTokens(
             balance,
@@ -305,6 +323,7 @@ def execute_sell(current_price):
         
         send_telegram_message(
             f"🔴 *VENTA DE RAVEN EJECUTADA*\n"
+            f"🔹 Motivo: `{reason}`\n"
             f"🔹 Tokens vendidos: `{human_raven:,.2f} RAVEN`\n"
             f"🔹 BNB recibido: `{bnb_received:.4f} BNB` (${usd_received:.2f} USD)\n"
             f"📈 *Precio real de venta:* `${real_sell_price:.8f}`\n"
@@ -313,34 +332,23 @@ def execute_sell(current_price):
         return True
     except Exception as e:
         logging.error(f"Sell execution failed: {e}")
-        send_telegram_message(f"❌ *ERROR DE VENTA*\nDetalle: `{e}`")
+        send_telegram_message(f"❌ *ERROR DE VENTA RAVEN*\nDetalle: `{e}`")
         return False
 
-def get_last_buy():
-    try:
-        with open("/home/vale/.raven_buy_price", "r") as f:
-            return float(f.read().strip())
-    except:
-        return 0.0
-
-def set_last_buy(price):
-    try:
-        with open("/home/vale/.raven_buy_price", "w") as f:
-            f.write(str(price))
-    except:
-        pass
-
 def main():
-    logging.info("Starting RAVEN/BNB Swing Bot with High-Frequency On-Chain Take-Profit...")
-    send_telegram_message("🤖 *Bot Iniciado*\nEl bot de RAVEN ha arrancado correctamente (Monitoreo On-Chain 15s activo)...")
-    last_buy_price = get_last_buy()
+    logging.info("Starting RAVEN/BNB Swing Bot (Enhanced Engine with 2-Tranche DCA & Dynamic 15% / Trailing TP)...")
+    send_telegram_message("🤖 *Raven Bot Iniciado (Motor Optimizado)*\n"
+                          "🔹 Entrada flexible (RSI < 28, DCA en 2 tramos)\n"
+                          "🔹 Take-Profit dinámico (+15% objetivo, trailing stop desde +10%)\n"
+                          "🔹 Monitoreo On-Chain 15s de alta frecuencia activo.")
     
+    state_data = load_state()
     consecutive_errors = 0
+    
     while True:
         try:
             account = web3.eth.account.from_key(PRIVATE_KEY)
             
-            # Detect state dynamically based on balances
             raven_contract = web3.eth.contract(address=web3.to_checksum_address(RAVEN_ADDRESS), abi=ERC20_ABI)
             raven_wei = raven_contract.functions.balanceOf(account.address).call()
             raven_balance = raven_wei / (10**18)
@@ -349,14 +357,28 @@ def main():
             bnb_balance = bnb_wei / (10**18)
             
             state = "WAITING_BUY"
-            if raven_balance > 100000: # If we have more than 100k RAVEN, we focus on selling
+            if raven_balance > 100000:
                 state = "WAITING_SELL"
+            else:
+                if state_data.get("buy_price", 0.0) > 0 and state_data.get("tranches_filled", 0) > 0:
+                    state_data = {
+                        "buy_price": 0.0,
+                        "buy_time": None,
+                        "tranches_filled": 0,
+                        "max_pnl_seen": 0.0,
+                        "trailing_stop_pnl": None,
+                        "total_bnb_spent": 0.0
+                    }
+                    save_state(state_data)
             
             closes = fetch_dex_prices()
             if len(closes) > 15:
                 rsi = calculate_rsi(closes)
                 current_price = closes[-1]
-                logging.info(f"Price: {current_price:.8f} | RSI: {rsi:.2f} | State: {state} | RAVEN: {raven_balance:.0f} | BNB: {bnb_balance:.4f}")
+                buy_price = state_data.get("buy_price", 0.0)
+                profit_pct = ((current_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0.0
+                
+                logging.info(f"RAVEN: ${current_price:.8f} | RSI: {rsi:.2f} | State: {state} (Tranches: {state_data.get('tranches_filled', 0)}/2) | PnL: {profit_pct:+.2f}% | RAVEN: {raven_balance:.0f} | BNB: {bnb_balance:.4f}")
                 
                 # Log to CSV
                 csv_file = "/home/vale/bot_history.csv"
@@ -370,39 +392,84 @@ def main():
                 except Exception as e:
                     logging.error(f"Error writing to CSV: {e}")
                 
-                # Fetch and log Macro factors
                 fetch_and_log_macro()
                 
+                # --- WAITING_BUY (Tranche 1) ---
                 if state == "WAITING_BUY":
-                    if bnb_balance > 0.01: # Minimum BNB to trade
-                        if rsi < 25:
-                            logging.info("RSI below 25. Executing Buy...")
-                            real_price = execute_buy(current_price)
+                    if bnb_balance > 0.03: # Minimum BNB to trade safely with gas
+                        # Relaxed threshold to 28 (from 25)
+                        if rsi < 28:
+                            logging.info("RSI below 28. Executing Tranche 1 Buy (60% of BNB)...")
+                            real_price, tokens, bnb_spent = execute_buy(current_price, pct_of_balance=0.60, tranche_idx=1)
                             if real_price:
-                                last_buy_price = real_price
-                                set_last_buy(last_buy_price)
+                                state_data["buy_price"] = real_price
+                                state_data["buy_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                                state_data["tranches_filled"] = 1
+                                state_data["max_pnl_seen"] = 0.0
+                                state_data["trailing_stop_pnl"] = None
+                                state_data["total_bnb_spent"] = bnb_spent
+                                save_state(state_data)
                                 state = "WAITING_SELL"
                     else:
-                        logging.info("Not enough BNB to buy.")
+                        logging.info("Not enough BNB above gas reserve to trade.")
+                        
+                # --- WAITING_SELL (Tranche 2 & Exits) ---
                 elif state == "WAITING_SELL":
-                    profit_pct = ((current_price - last_buy_price) / last_buy_price) * 100 if last_buy_price > 0 else 0
-                    
-                    if profit_pct >= 25 or (rsi > 75 and (last_buy_price == 0 or current_price > last_buy_price)):
-                        logging.info(f"Sell condition met. Profit: {profit_pct:.2f}% | RSI: {rsi:.2f}")
-                        if execute_sell(current_price):
-                            last_buy_price = 0
-                            set_last_buy(0)
+                    # Check Tranche 2 scale-in
+                    tranches = state_data.get("tranches_filled", 1)
+                    if tranches < 2 and bnb_balance > 0.03:
+                        if (profit_pct <= -6.0 and rsi < 35) or rsi < 25:
+                            logging.info(f"DCA condition met for RAVEN Tranche 2. PnL: {profit_pct:.2f}% | RSI: {rsi:.2f}. Executing Buy...")
+                            real_price2, tokens2, bnb_spent2 = execute_buy(current_price, pct_of_balance=0.90, tranche_idx=2)
+                            if real_price2:
+                                old_price = state_data.get("buy_price", real_price2)
+                                old_tokens = raven_balance
+                                new_total_tokens = old_tokens + tokens2
+                                new_avg_price = ((old_tokens * old_price) + (tokens2 * real_price2)) / new_total_tokens if new_total_tokens > 0 else real_price2
+                                
+                                state_data["buy_price"] = new_avg_price
+                                state_data["tranches_filled"] = 2
+                                state_data["total_bnb_spent"] = state_data.get("total_bnb_spent", 0.0) + bnb_spent2
+                                save_state(state_data)
+                                
+                                logging.info(f"Tranche 2 RAVEN Success: New Avg Price: ${new_avg_price:.8f}")
+                                send_telegram_message(
+                                    f"🟢 *COMPRA RAVEN (Tramo 2/2 DCA EJECUTADO)*\n"
+                                    f"🔹 Inversión: `{bnb_spent2:.4f} BNB`\n"
+                                    f"🔹 Tokens agregados: `{tokens2:,.2f} RAVEN`\n"
+                                    f"📊 *Precio Promedio Ponderado:* `${new_avg_price:.8f}`"
+                                )
+                                profit_pct = ((current_price - new_avg_price) / new_avg_price) * 100
+
+                    # Standard 15m candle exit evaluation
+                    sell_reason = None
+                    if profit_pct >= 15.0:
+                        sell_reason = f"Target de ganancia alcanzado (+{profit_pct:.2f}% >= +15.0%)"
+                    elif rsi >= 72 and profit_pct >= 3.0:
+                        sell_reason = f"Sobrecompra RSI ({rsi:.2f} >= 72 y PnL +{profit_pct:.2f}%)"
+                        
+                    if sell_reason:
+                        logging.info(f"15m Sell condition met: {sell_reason}")
+                        if execute_sell(current_price, reason=sell_reason):
+                            state_data = {
+                                "buy_price": 0.0,
+                                "buy_time": None,
+                                "tranches_filled": 0,
+                                "max_pnl_seen": 0.0,
+                                "trailing_stop_pnl": None,
+                                "total_bnb_spent": 0.0
+                            }
+                            save_state(state_data)
                             state = "WAITING_BUY"
-                    elif rsi > 75:
-                        logging.info(f"RSI > 75 but price is lower than buy price ({last_buy_price}). HODLing to prevent loss.")
             else:
                 logging.warning("Not enough data to calculate RSI yet.")
                 
             consecutive_errors = 0
             
-            # --- Interval & Fast On-Chain Monitoring Logic ---
+            # --- High-Frequency On-Chain Monitoring (15s spot check) ---
             if state == "WAITING_SELL":
-                logging.info("⚡ Holding RAVEN: Entering 15s high-frequency on-chain monitoring for +25% Take-Profit...")
+                buy_price = state_data.get("buy_price", 0.0)
+                logging.info(f"⚡ Holding RAVEN: Entering 15s high-frequency on-chain monitoring (Entry: ${buy_price:.8f})...")
                 start_cycle = time.time()
                 check_count = 0
                 while (time.time() - start_cycle) < 900:
@@ -410,51 +477,66 @@ def main():
                     check_count += 1
                     try:
                         spot_price = fetch_onchain_spot_price()
-                        if spot_price and last_buy_price > 0:
-                            profit_pct = ((spot_price - last_buy_price) / last_buy_price) * 100
+                        if spot_price and buy_price > 0:
+                            profit_pct = ((spot_price - buy_price) / buy_price) * 100
                             
-                            # Log heartbeat every ~60 seconds (every 4 ticks)
+                            # Track high water mark
+                            if profit_pct > state_data.get("max_pnl_seen", 0.0):
+                                state_data["max_pnl_seen"] = profit_pct
+                                if profit_pct >= 10.0:
+                                    state_data["trailing_stop_pnl"] = max(state_data.get("trailing_stop_pnl") or 0.0, profit_pct - 4.0)
+                                save_state(state_data)
+                            
                             if check_count % 4 == 0:
-                                target_price = last_buy_price * 1.25
-                                logging.info(f"[On-Chain Monitor] Spot: ${spot_price:.8f} | Profit: {profit_pct:+.2f}% | Target +25%: ${target_price:.8f}")
+                                t_stop = f" | Trailing Stop: +{state_data['trailing_stop_pnl']:.1f}%" if state_data.get('trailing_stop_pnl') else ""
+                                logging.info(f"[On-Chain Monitor] Spot: ${spot_price:.8f} | Profit: {profit_pct:+.2f}% (Peak: +{state_data.get('max_pnl_seen', 0.0):.2f}%{t_stop})")
                             
-                            # Real-time Take Profit (+25%) Trigger
-                            if profit_pct >= 25:
-                                logging.info(f"🎯 TAKE PROFIT TRIGGERED ON-CHAIN! Spot: ${spot_price:.8f} | Profit: {profit_pct:.2f}% (Target: >=25%)")
+                            fast_exit_reason = None
+                            if profit_pct >= 15.0:
+                                fast_exit_reason = f"Take-Profit en tiempo real (+{profit_pct:.2f}% >= +15%)"
+                            elif state_data.get("trailing_stop_pnl") is not None and profit_pct <= state_data["trailing_stop_pnl"]:
+                                fast_exit_reason = f"Trailing Stop Activado (+{profit_pct:.2f}%, pico fue +{state_data['max_pnl_seen']:.2f}%)"
+                                
+                            if fast_exit_reason:
+                                logging.info(f"🎯 TRIGGER DISPARADO ON-CHAIN: {fast_exit_reason}")
                                 send_telegram_message(
-                                    f"⚡ *TAKE PROFIT DISPARADO EN TIEMPO REAL (+25%)*\n"
+                                    f"⚡ *TAKE PROFIT DISPARADO EN TIEMPO REAL*\n"
                                     f"Mechazo detectado on-chain en PancakeSwap.\n"
+                                    f"🔹 Motivo: `{fast_exit_reason}`\n"
                                     f"🔹 Precio Spot: `${spot_price:.8f}`\n"
-                                    f"🔹 Precio de Compra: `${last_buy_price:.8f}`\n"
+                                    f"🔹 Precio de Entrada: `${buy_price:.8f}`\n"
                                     f"📈 Ganancia: `+{profit_pct:.2f}%`\n"
                                     f"🚀 Ejecutando venta inmediata..."
                                 )
-                                if execute_sell(spot_price):
-                                    last_buy_price = 0
-                                    set_last_buy(0)
+                                if execute_sell(spot_price, reason=fast_exit_reason):
+                                    state_data = {
+                                        "buy_price": 0.0,
+                                        "buy_time": None,
+                                        "tranches_filled": 0,
+                                        "max_pnl_seen": 0.0,
+                                        "trailing_stop_pnl": None,
+                                        "total_bnb_spent": 0.0
+                                    }
+                                    save_state(state_data)
                                     state = "WAITING_BUY"
                                     break
                     except Exception as e_fast:
                         logging.warning(f"Warning in fast on-chain check: {e_fast}")
             else:
-                # In WAITING_BUY, wait 15 minutes between candle & RSI evaluations
                 time.sleep(900)
                 
         except Exception as e:
             error_msg = str(e)
             consecutive_errors += 1
-            
             retry_delays = [2, 10, 60]
-            
             if consecutive_errors == len(retry_delays) + 1:
                 logging.error(f"Error persistente in main loop: {error_msg}")
-                send_telegram_message(f"⚠️ *ALERTA (RAVEN BOT)* ⚠️\nSe detectó un problema de red persistente:\n`{error_msg}`")
+                send_telegram_message(f"⚠️ *ALERTA (RAVEN BOT)* ⚠️\n`{error_msg}`")
                 time.sleep(60)
             elif consecutive_errors > len(retry_delays) + 1:
                 time.sleep(60)
             else:
                 delay = retry_delays[consecutive_errors - 1]
-                logging.warning(f"Micro-corte de red detectado (intento {consecutive_errors}). Reintentando en {delay} segundos...")
                 time.sleep(delay)
 
 if __name__ == "__main__":

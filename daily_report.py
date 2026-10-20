@@ -21,30 +21,30 @@ ERC20_ABI = [{"constant":True,"inputs":[{"name":"_owner","type":"address"}],"nam
 CAPITAL_FILE = "/home/vale/.capital_history.json"
 
 def send_telegram_message(text):
-    for attempt in range(3):
-        try:
-            url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
-            payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
-            requests.post(url, json=payload, timeout=10)
-            break
-        except:
-            time.sleep(30)
+    try:
+        url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+        payload = {"chat_id": TELEGRAM_CHAT_ID, "text": text, "parse_mode": "Markdown"}
+        requests.post(url, json=payload, timeout=8)
+    except Exception as e:
+        print(f"Telegram error: {e}")
 
 def get_last_log(service_name):
     try:
-        cmd = f"journalctl -u {service_name} -n 1 --no-pager"
-        last_log = subprocess.check_output(cmd, shell=True).decode('utf-8').strip()
-        if "INFO -" in last_log:
-            return last_log.split("INFO - ")[-1]
-        return last_log
-    except:
-        return "No se pudo leer el log."
+        res = subprocess.run(
+            ["journalctl", f"-u", service_name, "-n", "1", "--no-pager", "-o", "cat"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5
+        )
+        log = res.stdout.strip()
+        # Clean log if too long
+        if len(log) > 60:
+            log = log[:57] + "..."
+        return log if log else "Activo"
+    except Exception:
+        return "Activo"
 
 def calculate_variations(current_capital):
     today = datetime.now().strftime("%Y-%m-%d")
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    last_week = (datetime.now() - timedelta(days=7)).strftime("%Y-%m-%d")
-
+    
     # Load or initialize history
     if os.path.exists(CAPITAL_FILE):
         with open(CAPITAL_FILE, 'r') as f:
@@ -107,15 +107,13 @@ def fetch_data():
         
         price_raven = 0
         try:
-            # Fetch RAVEN price from GeckoTerminal pool
             res = requests.get("https://api.geckoterminal.com/api/v2/networks/bsc/pools/0x547037d9d7ac11cb2740727a7f4ca41111d7e608", timeout=10).json()
             price_raven = float(res['data']['attributes']['base_token_price_usd'])
-        except Exception as e:
+        except Exception:
             pass
 
         if price_raven == 0:
             try:
-                # Fallback via PancakeSwap V2 Router on-chain
                 router_address = "0x10ED43C718714eb63d5aA57B78B54704E256024E"
                 wbnb_address = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
                 router_abi = [{"inputs":[{"internalType":"uint256","name":"amountIn","type":"uint256"},{"internalType":"address[]","name":"path","type":"address[]"}],"name":"getAmountsOut","outputs":[{"internalType":"uint256[]","name":"amounts","type":"uint256[]"}],"stateMutability":"view","type":"function"}]
@@ -141,31 +139,55 @@ def fetch_data():
         msg += f"📝 Estado: `{log_raven}`\n\n"
     except Exception as e:
         msg += f"🦅 *RAVEN BOT:* Error al cargar ({e})\n\n"
-        raise e  # Force retry
+        raise e
 
-    # --- PI SECTION ---
+    # --- BITGET SECTION (PI, SUI, PEPE & USDT) ---
     try:
         balance = exchange.fetch_balance()
-        pi_balance = balance['total'].get('PI', 0)
         usdt_balance = balance['total'].get('USDT', 0)
         
-        ticker = exchange.fetch_ticker('PI/USDT')
-        price_pi = ticker['last']
-        
+        # 1. PI
+        pi_balance = balance['total'].get('PI', 0)
+        ticker_pi = exchange.fetch_ticker('PI/USDT')
+        price_pi = ticker_pi['last']
         val_pi_usdt = pi_balance * price_pi
-        capital_pi = val_pi_usdt + usdt_balance
-        total_capital += capital_pi
-
+        total_capital += val_pi_usdt
         log_pi = get_last_log("pibot")
         
         msg += "🟣 *PI BOT (Bitget)*\n"
         msg += f"🔹 PI: `{pi_balance:,.2f}` ({val_pi_usdt:,.2f} USDT)\n"
-        msg += f"🔹 USDT: `{usdt_balance:.2f}`\n"
         msg += f"📈 Precio PI: `${price_pi:.4f}`\n"
         msg += f"📝 Estado: `{log_pi}`\n\n"
+        
+        # 2. SUI (if held in Bitget spot)
+        sui_balance = balance['total'].get('SUI', 0)
+        if sui_balance > 0:
+            ticker_sui = exchange.fetch_ticker('SUI/USDT')
+            price_sui = ticker_sui['last']
+            val_sui_usdt = sui_balance * price_sui
+            total_capital += val_sui_usdt
+            msg += "🟢 *SUI BOT (Bitget Spot)*\n"
+            msg += f"🔹 SUI: `{sui_balance:,.2f}` ({val_sui_usdt:,.2f} USDT)\n"
+            msg += f"📈 Precio SUI: `${price_sui:.4f}`\n\n"
+            
+        # 3. PEPE (if held in Bitget spot)
+        pepe_balance = balance['total'].get('PEPE', 0)
+        if pepe_balance > 0:
+            ticker_pepe = exchange.fetch_ticker('PEPE/USDT')
+            price_pepe = ticker_pepe['last']
+            val_pepe_usdt = pepe_balance * price_pepe
+            total_capital += val_pepe_usdt
+            msg += "🐸 *PEPE BOT (Bitget Spot)*\n"
+            msg += f"🔹 PEPE: `{pepe_balance:,.0f}` ({val_pepe_usdt:,.2f} USDT)\n"
+            msg += f"📈 Precio PEPE: `${price_pepe:.8f}`\n\n"
+            
+        # Add free USDT
+        total_capital += usdt_balance
+        msg += f"💵 *USDT Disponible:* `${usdt_balance:,.2f} USDT`\n\n"
+
     except Exception as e:
-        msg += f"🟣 *PI BOT:* Error al cargar ({e})\n"
-        raise e # Force retry
+        msg += f"🟣 *BITGET BOT:* Error al cargar ({e})\n\n"
+        raise e
 
     # --- PORTFOLIO SUMMARY ---
     pct_daily, pct_weekly, pct_total, initial_cap = calculate_variations(total_capital)
@@ -182,16 +204,14 @@ def fetch_data():
     return msg
 
 def main():
-    # Retry logic up to 3 times with 60s delay
     for attempt in range(3):
         try:
             msg = fetch_data()
             send_telegram_message(msg)
             return
-        except Exception as e:
+        except Exception:
             time.sleep(60)
             
-    # If it completely fails 3 times, send the error report
     send_telegram_message("⚠️ *ERROR EN REPORTE DIARIO* ⚠️\nNo se pudo conectar a la red después de 3 intentos.")
 
 if __name__ == "__main__":
