@@ -159,13 +159,15 @@ def main():
                 
                 # --- WAITING_BUY / TRANCHE 1 ---
                 if state == "WAITING_BUY":
-                    if usdt_balance > 5:
+                    MAX_PI_BUDGET = 65.0
+                    allocated_usdt = min(usdt_balance, MAX_PI_BUDGET)
+                    if allocated_usdt > 5:
                         # Relaxed RSI threshold to 28 (from 25) for initial entry
                         if rsi < 28:
-                            logging.info("RSI below 28. Executing Tranche 1 Buy (50% of USDT)...")
+                            logging.info("RSI below 28. Executing Tranche 1 Buy (50% of PI budget)...")
                             try:
-                                # Spend 50% of available USDT for Tranche 1 (or 100% if balance is small < $15)
-                                usdt_to_spend = (usdt_balance * 0.50) if usdt_balance >= 15 else (usdt_balance * 0.98)
+                                # Spend 50% of allocated USDT for Tranche 1
+                                usdt_to_spend = (allocated_usdt * 0.50) if allocated_usdt >= 15 else (allocated_usdt * 0.98)
                                 limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 1.02))
                                 amount_to_buy = (usdt_to_spend * 0.98) / limit_price
                                 amount_to_buy = float(exchange.amount_to_precision(SYMBOL, amount_to_buy))
@@ -202,12 +204,14 @@ def main():
                 elif state == "WAITING_SELL":
                     # Check if Tranche 2 should be executed (DCA scale-in)
                     tranches = state_data.get("tranches_filled", 1)
-                    if tranches < 2 and usdt_balance >= 5:
+                    MAX_PI_BUDGET = 65.0
+                    allocated_usdt = min(usdt_balance, MAX_PI_BUDGET * 0.50)
+                    if tranches < 2 and allocated_usdt >= 5:
                         # Trigger Tranche 2 if price dipped >= 4.5% below initial entry OR RSI < 25 again
                         if (profit_pct <= -4.5 and rsi < 35) or rsi < 25:
                             logging.info(f"DCA condition met for Tranche 2. PnL: {profit_pct:.2f}% | RSI: {rsi:.2f}. Executing Buy...")
                             try:
-                                usdt_to_spend = usdt_balance * 0.98
+                                usdt_to_spend = allocated_usdt * 0.98
                                 limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 1.02))
                                 amount_to_buy = usdt_to_spend / limit_price
                                 amount_to_buy = float(exchange.amount_to_precision(SYMBOL, amount_to_buy))

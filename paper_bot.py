@@ -24,8 +24,8 @@ TRADES_FILE = "/home/vale/paper_trades.csv"
 PAIRS = {
     "SUI/USDT": {
         "name": "SUI",
-        "mode": os.getenv("SUI_MODE", "PAPER"),
-        "initial_usdt": 150.0,
+        "mode": os.getenv("SUI_MODE", "REAL"),
+        "initial_usdt": 110.0,
         "take_profit_pct": 8.0,      # Dynamic TP milestone (+8%)
         "trailing_trigger_pct": 5.0, # Activate trailing stop at +5%
         "trailing_delta_pct": 2.5,   # Trailing distance (peak - 2.5%)
@@ -36,8 +36,8 @@ PAIRS = {
     },
     "PEPE/USDT": {
         "name": "PEPE",
-        "mode": os.getenv("PEPE_MODE", "PAPER"),
-        "initial_usdt": 110.0,
+        "mode": os.getenv("PEPE_MODE", "REAL"),
+        "initial_usdt": 80.0,
         "take_profit_pct": 12.0,     # Dynamic TP milestone (+12%)
         "trailing_trigger_pct": 7.0, # Activate trailing stop at +7%
         "trailing_delta_pct": 3.5,   # Trailing distance (peak - 3.5%)
