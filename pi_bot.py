@@ -187,6 +187,13 @@ def main():
                                 state_data["trailing_stop_pnl"] = None
                                 save_state(state_data)
                                 
+                                # Immediately log new balance to CSV for instant dashboard sync
+                                try:
+                                    with open(CSV_FILE, mode='a', newline='') as cf:
+                                        csv.writer(cf).writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{current_price:.4f}", f"{rsi:.2f}", "WAITING_SELL", f"{pi_balance + amount_to_buy:.2f}", f"{usdt_balance - usdt_to_spend:.2f}"])
+                                except Exception:
+                                    pass
+                                
                                 logging.info(f"Tranche 1 Buy Success: {order['id']} at price: ${real_price:.4f}")
                                 send_telegram_message(
                                     f"🟢 *COMPRA PI (Tramo 1/2 EJECUTADO)*\n"
@@ -235,6 +242,13 @@ def main():
                                 state_data["buy_price"] = new_avg_price
                                 state_data["tranches_filled"] = 2
                                 save_state(state_data)
+                                
+                                # Immediately log new balance to CSV for instant dashboard sync
+                                try:
+                                    with open(CSV_FILE, mode='a', newline='') as cf:
+                                        csv.writer(cf).writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{current_price:.4f}", f"{rsi:.2f}", state, f"{total_tokens:.2f}", f"{usdt_balance - usdt_to_spend:.2f}"])
+                                except Exception:
+                                    pass
                                 
                                 logging.info(f"Tranche 2 Buy Success: {order['id']} at price: ${real_price:.4f}. New Avg: ${new_avg_price:.4f}")
                                 send_telegram_message(
@@ -310,6 +324,13 @@ def main():
                                 "trailing_stop_pnl": None
                             }
                             save_state(state_data)
+                            
+                            # Immediately log to CSV for instant dashboard sync
+                            try:
+                                with open(CSV_FILE, mode='a', newline='') as cf:
+                                    csv.writer(cf).writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{current_price:.4f}", f"{rsi:.2f}", "WAITING_BUY", "0.00", f"{usdt_balance + (pi_balance * float(real_sell_price)):.2f}"])
+                            except Exception:
+                                pass
                             
                             logging.info(f"Sell Order Success: {order['id']} at real price: {real_sell_price}")
                             send_telegram_message(
