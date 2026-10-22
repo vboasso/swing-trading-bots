@@ -174,9 +174,19 @@ def execute_real_order(exchange, symbol, side, amount, price):
         time.sleep(2)
         try:
             order_info = exchange.fetch_order(order['id'], symbol)
-            real_p = float(order_info.get('average') or order_info.get('price') or price)
+            raw = order_info.get('info', {})
+            if raw.get('avgPrice') and float(raw['avgPrice']) > 0:
+                real_p = float(raw['avgPrice'])
+            elif raw.get('cumExecValue') and raw.get('cumExecQty') and float(raw.get('cumExecQty', 0)) > 0:
+                real_p = float(raw['cumExecValue']) / float(raw['cumExecQty'])
+            else:
+                real_p = float(order_info.get('average') or order_info.get('price') or price)
         except Exception:
-            real_p = float(order.get('average') or order.get('price') or price)
+            raw = order.get('info', {})
+            if raw.get('avgPrice') and float(raw['avgPrice']) > 0:
+                real_p = float(raw['avgPrice'])
+            else:
+                real_p = float(order.get('average') or order.get('price') or price)
         return real_p, amt
     except Exception as e:
         logging.error(f"Bitget Real Order Failed for {symbol} ({side}): {e}")

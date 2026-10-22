@@ -176,9 +176,19 @@ def main():
                                 time.sleep(2)
                                 try:
                                     order_info = exchange.fetch_order(order['id'], SYMBOL)
-                                    real_price = float(order_info.get('average') or order_info.get('price') or current_price)
+                                    raw = order_info.get('info', {})
+                                    if raw.get('avgPrice') and float(raw['avgPrice']) > 0:
+                                        real_price = float(raw['avgPrice'])
+                                    elif raw.get('cumExecValue') and raw.get('cumExecQty') and float(raw.get('cumExecQty', 0)) > 0:
+                                        real_price = float(raw['cumExecValue']) / float(raw['cumExecQty'])
+                                    else:
+                                        real_price = float(order_info.get('average') or order_info.get('price') or current_price)
                                 except Exception:
-                                    real_price = float(order.get('average') or order.get('price') or current_price)
+                                    raw = order.get('info', {})
+                                    if raw.get('avgPrice') and float(raw['avgPrice']) > 0:
+                                        real_price = float(raw['avgPrice'])
+                                    else:
+                                        real_price = float(order.get('average') or order.get('price') or current_price)
                                 
                                 state_data["buy_price"] = real_price
                                 state_data["buy_time"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -227,9 +237,19 @@ def main():
                                 time.sleep(2)
                                 try:
                                     order_info = exchange.fetch_order(order['id'], SYMBOL)
-                                    real_price = float(order_info.get('average') or order_info.get('price') or current_price)
+                                    raw = order_info.get('info', {})
+                                    if raw.get('avgPrice') and float(raw['avgPrice']) > 0:
+                                        real_price = float(raw['avgPrice'])
+                                    elif raw.get('cumExecValue') and raw.get('cumExecQty') and float(raw.get('cumExecQty', 0)) > 0:
+                                        real_price = float(raw['cumExecValue']) / float(raw['cumExecQty'])
+                                    else:
+                                        real_price = float(order_info.get('average') or order_info.get('price') or current_price)
                                 except Exception:
-                                    real_price = float(order.get('average') or order.get('price') or current_price)
+                                    raw = order.get('info', {})
+                                    if raw.get('avgPrice') and float(raw['avgPrice']) > 0:
+                                        real_price = float(raw['avgPrice'])
+                                    else:
+                                        real_price = float(order.get('average') or order.get('price') or current_price)
                                     
                                 # Recalculate weighted average buy price
                                 old_price = state_data.get("buy_price", real_price)
