@@ -451,6 +451,31 @@ def get_all_bot_data():
         sui_data["history"] = sui_data["history"][-5:]
         pepe_data["history"] = pepe_data["history"][-5:]
 
+    # Enforce authoritative live state from paper_state_data (JSON)
+    if "SUI/USDT" in paper_state_data:
+        s_live = paper_state_data["SUI/USDT"]
+        s_tok = safe_float(s_live.get("token_balance", 0.0))
+        s_st = s_live.get("state", "WAITING_BUY") if s_tok > 0 else "WAITING_BUY"
+        sui_data["state"] = s_st
+        s_tr = s_live.get("tranches_filled", 1)
+        sui_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {s_tr}/3]" if s_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+        if s_st == "WAITING_SELL" and sui_data["buy_price"] > 0 and sui_data["price"] > 0:
+            sui_data["pnl_pct"] = round(((sui_data["price"] - sui_data["buy_price"]) / sui_data["buy_price"]) * 100, 2)
+        else:
+            sui_data["pnl_pct"] = 0.0
+
+    if "PEPE/USDT" in paper_state_data:
+        p_live = paper_state_data["PEPE/USDT"]
+        p_tok = safe_float(p_live.get("token_balance", 0.0))
+        p_st = p_live.get("state", "WAITING_BUY") if p_tok > 0 else "WAITING_BUY"
+        pepe_data["state"] = p_st
+        p_tr = p_live.get("tranches_filled", 1)
+        pepe_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {p_tr}/3]" if p_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+        if p_st == "WAITING_SELL" and pepe_data["buy_price"] > 0 and pepe_data["price"] > 0:
+            pepe_data["pnl_pct"] = round(((pepe_data["price"] - pepe_data["buy_price"]) / pepe_data["buy_price"]) * 100, 2)
+        else:
+            pepe_data["pnl_pct"] = 0.0
+
     # --- Capital Portfolio ---
     capital_info = {
         "initial": 307.19,

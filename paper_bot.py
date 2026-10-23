@@ -278,6 +278,17 @@ def run_multi_bot_cycle(exchange, state):
                 p_state["trades_count"] += 1
                 save_state(state)
                 
+                try:
+                    with open(HISTORY_FILE, mode='a', newline='') as hf:
+                        hwriter = csv.writer(hf)
+                        hwriter.writerow([
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            symbol, f"{real_p:.8f}", f"{rsi:.2f}", "WAITING_SELL",
+                            f"{p_state['token_balance']:.4f}", f"{p_state['usdt_balance']:.2f}"
+                        ])
+                except Exception:
+                    pass
+                
                 log_trade(symbol, "BUY", real_p, tokens_bought, usdt_to_spend, mode=mode)
                 logging.info(f"🟢 [{mode} {token_name}] COMPRA Tramo 1/3 a ${real_p:.6f} | RSI: {rsi:.2f}")
                 send_telegram(
@@ -403,6 +414,17 @@ def run_multi_bot_cycle(exchange, state):
                 p_state["realized_pnl_usd"] += pnl_usd
                 p_state["trades_count"] += 1
                 save_state(state)
+                
+                try:
+                    with open(HISTORY_FILE, mode='a', newline='') as hf:
+                        hwriter = csv.writer(hf)
+                        hwriter.writerow([
+                            datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            symbol, f"{real_sell_p:.8f}", f"{rsi:.2f}", "WAITING_BUY",
+                            "0.0000", f"{p_state['usdt_balance']:.2f}"
+                        ])
+                except Exception:
+                    pass
                 
                 log_trade(symbol, "SELL", real_sell_p, tokens_to_sell, net_usdt, profit_pct, mode=mode)
                 logging.info(f"🔴 [{mode} {token_name}] VENTA a ${real_sell_p:.6f} | Motivo: {exit_reason}")
