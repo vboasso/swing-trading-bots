@@ -162,14 +162,26 @@ def fetch_candles_and_rsi(exchange, symbol):
 
 def execute_real_order(exchange, symbol, side, amount, price):
     try:
+        base_coin = symbol.split('/')[0]
         if side == "BUY":
-            limit_price = float(exchange.price_to_precision(symbol, price * 1.02))
+            limit_price = float(exchange.price_to_precision(symbol, price * 1.01))
             amt = float(exchange.amount_to_precision(symbol, amount))
             order = exchange.create_limit_buy_order(symbol, amt, limit_price)
         else:
-            limit_price = float(exchange.price_to_precision(symbol, price * 0.98))
+            try:
+                b = exchange.fetch_balance()
+                actual_free = float(b['free'].get(base_coin, 0.0))
+                amount = min(amount, actual_free)
+            except Exception as e:
+                logging.warning(f"Could not verify free balance for {symbol}: {e}")
+                
             amt = float(exchange.amount_to_precision(symbol, amount))
-            order = exchange.create_limit_sell_order(symbol, amt, limit_price)
+            limit_price = float(exchange.price_to_precision(symbol, price * 0.99))
+            try:
+                order = exchange.create_limit_sell_order(symbol, amt, limit_price)
+            except Exception as e:
+                logging.warning(f"Limit sell failed for {symbol} ({e}), trying market sell...")
+                order = exchange.create_market_sell_order(symbol, amt)
             
         time.sleep(2)
         try:
@@ -373,6 +385,7 @@ def run_multi_bot_cycle(exchange, state):
                     if not real_sell_p:
                         logging.error(f"Real sell order failed for {symbol}")
                         continue
+                    tokens_to_sell = executed_amt
                     net_usdt = executed_amt * real_sell_p
                 else:
                     sim_fee = net_usdt * 0.001

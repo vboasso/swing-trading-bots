@@ -324,8 +324,11 @@ def main():
                         logging.info(f"Sell condition met: {sell_reason}")
                         try:
                             pi_balance = float(exchange.amount_to_precision(SYMBOL, pi_balance))
-                            limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 0.98))
-                            order = exchange.create_limit_sell_order(SYMBOL, pi_balance, limit_price)
+                            limit_price = float(exchange.price_to_precision(SYMBOL, current_price * 0.99))
+                            try:
+                                order = exchange.create_limit_sell_order(SYMBOL, pi_balance, limit_price)
+                            except Exception:
+                                order = exchange.create_market_sell_order(SYMBOL, pi_balance)
                             time.sleep(2)
                             try:
                                 order_info = exchange.fetch_order(order['id'], SYMBOL)
