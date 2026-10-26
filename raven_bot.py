@@ -24,11 +24,28 @@ else:
 WALLET_ADDRESS = os.getenv("WALLET_ADDRESS")
 RAVEN_ADDRESS = os.getenv("RAVEN_ADDRESS", "0xcd7c5025753a49f1881b31c48caa7c517bb46308") 
 
-BSC_RPC = "https://bsc-dataseed.binance.org/"
+BSC_RPCS = [
+    "https://bsc-dataseed.binance.org/",
+    "https://bsc-dataseed1.defibit.io/",
+    "https://bsc-dataseed2.defibit.io/",
+    "https://bsc-dataseed1.ninicoin.io/",
+    "https://bsc-dataseed2.ninicoin.io/",
+    "https://bsc.meowrpc.com"
+]
+current_rpc_idx = 0
+BSC_RPC = BSC_RPCS[0]
 ROUTER_ADDRESS = "0x10ED43C718714eb63d5aA57B78B54704E256024E" # PancakeSwap V2
 WBNB_ADDRESS = "0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c"
 
-web3 = Web3(Web3.HTTPProvider(BSC_RPC))
+web3 = Web3(Web3.HTTPProvider(BSC_RPC, request_kwargs={'timeout': 8}))
+
+def rotate_rpc():
+    global current_rpc_idx, web3, BSC_RPC
+    current_rpc_idx = (current_rpc_idx + 1) % len(BSC_RPCS)
+    BSC_RPC = BSC_RPCS[current_rpc_idx]
+    web3 = Web3(Web3.HTTPProvider(BSC_RPC, request_kwargs={'timeout': 8}))
+    logging.info(f"🔄 Rotando nodo RPC de BSC a: {BSC_RPC}")
+    return web3
 
 ERC20_ABI = [
     {"constant":True,"inputs":[{"name":"_owner","type":"address"}],"name":"balanceOf","outputs":[{"name":"balance","type":"uint256"}],"type":"function"},
@@ -522,21 +539,23 @@ def main():
                                     break
                     except Exception as e_fast:
                         logging.warning(f"Warning in fast on-chain check: {e_fast}")
+                        rotate_rpc()
             else:
                 time.sleep(900)
                 
         except Exception as e:
             error_msg = str(e)
+            rotate_rpc()
             consecutive_errors += 1
-            retry_delays = [2, 10, 60]
-            if consecutive_errors == len(retry_delays) + 1:
-                logging.error(f"Error persistente in main loop: {error_msg}")
+            retry_delays = [2, 5, 10, 30]
+            if consecutive_errors >= len(BSC_RPCS) + 2:
+                logging.error(f"Error persistente in main loop tras rotar todos los RPCs: {error_msg}")
                 send_telegram_message(f"⚠️ *ALERTA (RAVEN BOT)* ⚠️\n`{error_msg}`")
                 time.sleep(60)
-            elif consecutive_errors > len(retry_delays) + 1:
+            elif consecutive_errors > len(BSC_RPCS) + 2:
                 time.sleep(60)
             else:
-                delay = retry_delays[consecutive_errors - 1]
+                delay = retry_delays[min(consecutive_errors - 1, len(retry_delays) - 1)]
                 time.sleep(delay)
 
 if __name__ == "__main__":
