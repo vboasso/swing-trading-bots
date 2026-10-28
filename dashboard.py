@@ -1452,8 +1452,8 @@ HTML_PAGE = """<!DOCTYPE html>
         </div>
 
         <div class="card-footer">
-          <span>Último ciclo: ${b.last_update}</span>
-          <span>Ciclo: 15 min</span>
+          <span>Último: ${b.last_update ? b.last_update.split(' ')[1] : '—'}</span>
+          <span id="next-cycle-${b.id}" style="font-weight: 500;">Ciclo: 15 min</span>
         </div>
       </div>
     `;
@@ -1558,9 +1558,11 @@ HTML_PAGE = """<!DOCTYPE html>
 
       // Render Cards
       if (data.bots && data.bots.length > 0) {
+        currentBotsData = data.bots;
         const cardsHtml = data.bots.map(b => renderCard(b)).join("");
         document.getElementById("bots-container").innerHTML = cardsHtml;
         renderHistory(data.bots);
+        updateCountdowns();
       }
 
       countdownTimer = 20;
@@ -1573,11 +1575,57 @@ HTML_PAGE = """<!DOCTYPE html>
     }
   }
 
+  let currentBotsData = [];
+
+  function updateCountdowns() {
+    if (!currentBotsData || currentBotsData.length === 0) return;
+    const now = new Date();
+    
+    currentBotsData.forEach(b => {
+      const el = document.getElementById(`next-cycle-${b.id}`);
+      if (!el) return;
+      
+      const isRavenFast = (b.id === "raven" && b.state === "WAITING_SELL");
+      if (isRavenFast) {
+        el.innerHTML = `<span style="color:var(--accent-cyan);font-weight:600">⚡ Ciclo: 15 seg</span>`;
+        return;
+      }
+      
+      if (!b.last_update || b.last_update === "N/A") {
+        el.textContent = "Ciclo: 15 min";
+        return;
+      }
+      
+      const dateParts = b.last_update.split(" ");
+      if (dateParts.length !== 2) {
+        el.textContent = "Ciclo: 15 min";
+        return;
+      }
+      const [ymd, hms] = dateParts;
+      const [year, month, day] = ymd.split("-").map(Number);
+      const [hours, minutes, seconds] = hms.split(":").map(Number);
+      
+      const lastUpdateDate = new Date(year, month - 1, day, hours, minutes, seconds);
+      const nextCycleDate = new Date(lastUpdateDate.getTime() + (15 * 60 * 1000));
+      const remainingSecs = Math.floor((nextCycleDate.getTime() - now.getTime()) / 1000);
+      
+      if (remainingSecs <= 0) {
+        el.innerHTML = `<span style="color:var(--accent-amber);font-weight:600">⏳ Próximo: en instantes...</span>`;
+      } else {
+        const m = Math.floor(remainingSecs / 60);
+        const s = remainingSecs % 60;
+        const sFormatted = s < 10 ? `0${s}` : s;
+        el.innerHTML = `<span style="color:var(--text-muted)">⏱️ Próximo en: <strong style="color:var(--text-main);font-family:var(--font-mono)">${m}:${sFormatted}</strong> min</span>`;
+      }
+    });
+  }
+
   // Timer loop
   setInterval(() => {
     countdownTimer--;
     const el = document.getElementById("countdown");
     if (el) el.textContent = countdownTimer;
+    updateCountdowns();
     if (countdownTimer <= 0) {
       countdownTimer = 20;
       fetchData();
