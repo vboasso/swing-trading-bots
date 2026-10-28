@@ -28,6 +28,33 @@ PAPER_STATE = os.path.join(BASE_DIR, "paper_bot_state.json")
 PAPER_HISTORY = os.path.join(BASE_DIR, "paper_bot_history.csv")
 CAPITAL_HISTORY = os.path.join(BASE_DIR, ".capital_history.json")
 TUNNEL_FILE = os.path.join(BASE_DIR, "tunnel_url.txt")
+TRADES_FILE = os.path.join(BASE_DIR, "paper_trades.csv")
+
+def get_trades_ledger(limit=10):
+    trades = []
+    if os.path.exists(TRADES_FILE):
+        try:
+            with open(TRADES_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                lines = [l.strip() for l in f if l.strip()]
+                if len(lines) > 1:
+                    for l in reversed(lines[1:]):
+                        parts = l.split(",")
+                        if len(parts) >= 7:
+                            trades.append({
+                                "timestamp": parts[0],
+                                "symbol": parts[1],
+                                "action": parts[2],
+                                "price": safe_float(parts[3]),
+                                "amount": safe_float(parts[4]),
+                                "usdt_value": safe_float(parts[5]),
+                                "profit_pct": parts[6],
+                                "mode": parts[7] if len(parts) > 7 else "REAL"
+                            })
+                            if len(trades) >= limit:
+                                break
+        except Exception:
+            pass
+    return trades
 
 
 def safe_float(val, default=0.0):
@@ -508,10 +535,97 @@ def get_all_bot_data():
         except Exception:
             pass
 
+    # Enrich parameters for decision sliders
+    # Pi Network
+    pi_pst_file = os.path.join(BASE_DIR, ".pi_state.json")
+    pi_pst = {}
+    if os.path.exists(pi_pst_file):
+        try:
+            with open(pi_pst_file) as pf:
+                pi_pst = json.load(pf)
+        except Exception:
+            pass
+    pi_data["tranches_filled"] = pi_pst.get("tranches_filled", 2 if pi_data["state"] == "WAITING_SELL" else 0)
+    pi_data["max_tranches"] = 2
+    pi_data["take_profit_pct"] = 8.0
+    pi_data["trailing_trigger_pct"] = 5.0
+    pi_data["trailing_stop_pnl"] = pi_pst.get("trailing_stop_pnl")
+    pi_data["max_pnl_seen"] = safe_float(pi_pst.get("max_pnl_seen", 0.0))
+    pi_data["rsi_buy"] = 28.0
+    pi_data["next_dca_pnl"] = -6.0 if pi_data["tranches_filled"] == 1 else None
+
+    # Raven DEX
+    raven_data["tranches_filled"] = 1 if raven_data["state"] == "WAITING_SELL" else 0
+    raven_data["max_tranches"] = 1
+    raven_data["take_profit_pct"] = 15.0
+    raven_data["trailing_trigger_pct"] = 10.0
+    raven_data["trailing_stop_pnl"] = None
+    raven_data["max_pnl_seen"] = 0.0
+    raven_data["rsi_buy"] = 30.0
+    raven_data["next_dca_pnl"] = None
+
+    # SUI Network
+    s_live_info = paper_state_data.get("SUI/USDT", {})
+    sui_data["tranches_filled"] = s_live_info.get("tranches_filled", 3 if sui_data["state"] == "WAITING_SELL" else 0)
+    sui_data["max_tranches"] = 3
+    sui_data["take_profit_pct"] = 8.0
+    sui_data["trailing_trigger_pct"] = 5.0
+    sui_data["trailing_stop_pnl"] = s_live_info.get("trailing_stop_pnl")
+    sui_data["max_pnl_seen"] = safe_float(s_live_info.get("max_pnl_seen", 0.0))
+    sui_data["rsi_buy"] = 28.0
+    s_tr_val = sui_data["tranches_filled"]
+    sui_data["next_dca_pnl"] = -4.0 if s_tr_val == 1 else (-8.0 if s_tr_val == 2 else None)
+
+    # PEPE Meme
+    p_live_info = paper_state_data.get("PEPE/USDT", {})
+    pepe_data["tranches_filled"] = p_live_info.get("tranches_filled", 0)
+    pepe_data["max_tranches"] = 3
+    pepe_data["take_profit_pct"] = 12.0
+    pepe_data["trailing_trigger_pct"] = 7.0
+    pepe_data["trailing_stop_pnl"] = p_live_info.get("trailing_stop_pnl")
+    pepe_data["max_pnl_seen"] = safe_float(p_live_info.get("max_pnl_seen", 0.0))
+    pepe_data["rsi_buy"] = 28.0
+    p_tr_val = pepe_data["tranches_filled"]
+    pepe_data["next_dca_pnl"] = -4.5 if p_tr_val == 1 else (-9.0 if p_tr_val == 2 else None)
+
+    # Compute Portfolio Exposure
+    total_cap = capital_info["current"]
+    pi_tok_val = pi_data["token_balance"] * pi_data["price"]
+    sui_tok_val = sui_data["token_balance"] * sui_data["price"]
+    pepe_tok_val = pepe_data["token_balance"] * pepe_data["price"]
+    raven_tok_val = (raven_data["token_balance"] * raven_data["price"] * 530.0) if raven_data["token_balance"] > 0 else 0.0
+    
+    token_capital_usd = round(pi_tok_val + sui_tok_val + pepe_tok_val + raven_tok_val, 2)
+    liquidity_capital_usd = round(max(0.0, total_cap - token_capital_usd), 2)
+    token_pct = round((token_capital_usd / total_cap) * 100, 1) if total_cap > 0 else 0.0
+    liquidity_pct = round(100.0 - token_pct, 1)
+
+    pi_total_usd = pi_tok_val + pi_data["quote_balance"]
+    sui_total_usd = sui_tok_val + sui_data["quote_balance"]
+    pepe_total_usd = pepe_tok_val + pepe_data["quote_balance"]
+    raven_bnb_quote_usd = raven_data["quote_balance"] * 530.0
+    raven_total_usd = raven_tok_val + raven_bnb_quote_usd
+
+    exposure_data = {
+        "total_usd": total_cap,
+        "token_usd": token_capital_usd,
+        "token_pct": token_pct,
+        "liquidity_usd": liquidity_capital_usd,
+        "liquidity_pct": liquidity_pct,
+        "assets": [
+            {"id": "pi", "name": "PI", "symbol": "PI/USDT", "value_usd": round(pi_total_usd, 2), "pct": round((pi_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-amber)"},
+            {"id": "sui", "name": "SUI", "symbol": "SUI/USDT", "value_usd": round(sui_total_usd, 2), "pct": round((sui_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-blue)"},
+            {"id": "pepe", "name": "PEPE", "symbol": "PEPE/USDT", "value_usd": round(pepe_total_usd, 2), "pct": round((pepe_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-green)"},
+            {"id": "raven", "name": "RAVEN", "symbol": "RAVEN/BNB", "value_usd": round(raven_total_usd, 2), "pct": round((raven_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-cyan)"}
+        ]
+    }
+
     return {
         "timestamp": now_str,
         "system": get_system_stats(),
         "capital": capital_info,
+        "exposure": exposure_data,
+        "trades": get_trades_ledger(10),
         "tunnel_url": tunnel_url,
         "bots": [pi_data, raven_data, sui_data, pepe_data],
     }
@@ -1011,6 +1125,236 @@ HTML_PAGE = """<!DOCTYPE html>
       color: #cbd5e1;
     }
 
+    /* Analytics & Decisions Section */
+    .analytics-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border-card);
+      border-radius: 16px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+    }
+
+    .analytics-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #1a2333;
+    }
+
+    .analytics-title {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .analytics-subtitle {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-weight: 400;
+    }
+
+    /* Exposure Bar */
+    .exposure-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .exposure-stats-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.78rem;
+      font-weight: 600;
+    }
+
+    .exposure-bar {
+      width: 100%;
+      height: 14px;
+      border-radius: 10px;
+      background: #0d131f;
+      display: flex;
+      overflow: hidden;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
+      border: 1px solid var(--border-card);
+    }
+
+    .exposure-seg {
+      height: 100%;
+      transition: width 0.4s ease;
+      position: relative;
+    }
+
+    .exposure-legend {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .exposure-item {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+    }
+
+    .exposure-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+
+    /* Decision Sliders */
+    .sliders-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 12px;
+    }
+
+    .slider-box {
+      background: #0d131f;
+      border: 1px solid var(--border-card);
+      border-radius: 12px;
+      padding: 12px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      transition: border-color 0.2s;
+    }
+
+    .slider-box:hover {
+      border-color: var(--border-accent);
+    }
+
+    .slider-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .slider-sym {
+      font-size: 0.88rem;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .slider-track-wrap {
+      position: relative;
+      margin: 18px 0 10px;
+      padding: 0 4px;
+    }
+
+    .slider-track {
+      width: 100%;
+      height: 16px;
+      border-radius: 10px;
+      background: #1a2333;
+      position: relative;
+      overflow: visible;
+      display: flex;
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+    }
+
+    .slider-pin {
+      position: absolute;
+      top: -16px;
+      transform: translateX(-50%);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      z-index: 10;
+      pointer-events: none;
+    }
+
+    .slider-pin-badge {
+      font-size: 0.65rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      padding: 2px 7px;
+      border-radius: 6px;
+      color: #0a0e17;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+    }
+
+    .slider-pin-arrow {
+      width: 6px;
+      height: 6px;
+      transform: rotate(45deg);
+      margin-top: -3px;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+    }
+
+    .slider-sub {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.68rem;
+      color: var(--text-muted);
+      line-height: 1.3;
+    }
+
+    /* Ledger Table */
+    .ledger-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.76rem;
+      font-family: var(--font-mono);
+    }
+
+    .ledger-table th {
+      text-align: left;
+      color: var(--text-dim);
+      font-weight: 600;
+      padding: 6px 8px;
+      font-size: 0.68rem;
+      text-transform: uppercase;
+      border-bottom: 1px solid var(--border-card);
+    }
+
+    .ledger-table td {
+      padding: 7px 8px;
+      border-top: 1px solid #141b29;
+      color: #cbd5e1;
+    }
+
+    .ledger-table tr:hover td {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    .badge-trade {
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      display: inline-block;
+    }
+
+    .badge-buy {
+      background: rgba(6, 182, 212, 0.15);
+      color: var(--accent-cyan);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+    }
+
+    .badge-sell {
+      background: rgba(16, 185, 129, 0.15);
+      color: var(--accent-green);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+    }
+
     /* Scroll Navigation Button */
     .scroll-btn-wrap {
       display: flex;
@@ -1270,18 +1614,51 @@ HTML_PAGE = """<!DOCTYPE html>
   <!-- Scroll Navigation Helper -->
   <div class="scroll-btn-wrap">
     <button class="btn-scroll-toggle" id="scroll-toggle-btn" onclick="toggleScroll()">
-      <span id="scroll-icon">▼</span> <span id="scroll-text">Ver Historial de Velas Recientes</span>
+      <span id="scroll-icon">▼</span> <span id="scroll-text">Ver Exposición, Gatillos y Registro de Trades</span>
     </button>
   </div>
 
-  <!-- Recent Logs Feed -->
-  <div class="history-card">
-    <div class="history-title">
-      <span>📊 Actividad Reciente (Últimos chequeos cada 15m)</span>
-      <span style="font-size: 0.75rem; color: var(--text-dim); font-weight: normal;">Sincronizado con CSVs locales</span>
-    </div>
-    <div class="history-grid" id="history-container">
+  <!-- Integrated Analytics Section -->
+  <div id="analytics-section">
+    <!-- 1. Portfolio Exposure -->
+    <div class="analytics-card" id="exposure-container">
       <!-- Populated by JS -->
+    </div>
+
+    <!-- 2. Dynamic Decision Sliders -->
+    <div class="analytics-card">
+      <div class="analytics-header">
+        <span class="analytics-title">🎯 Regletas de Decisión & Gatillos en Vivo</span>
+        <span class="analytics-subtitle">Adaptación dinámica a cada estado: Liquidez, DCA o Venta TP</span>
+      </div>
+      <div class="sliders-grid" id="sliders-container">
+        <!-- Populated by JS -->
+      </div>
+    </div>
+
+    <!-- 3. Executed Trades Ledger -->
+    <div class="analytics-card">
+      <div class="analytics-header">
+        <span class="analytics-title">📋 Registro de Órdenes Reales Ejecutadas (Ledger de Trades)</span>
+        <span class="analytics-subtitle">Extracción directa de paper_trades.csv</span>
+      </div>
+      <div style="overflow-x:auto;">
+        <table class="ledger-table">
+          <thead>
+            <tr>
+              <th>Fecha / Hora</th>
+              <th>Par</th>
+              <th>Acción</th>
+              <th style="text-align:right">Precio</th>
+              <th style="text-align:right">Monto Operado</th>
+              <th style="text-align:right">Resultado / PnL</th>
+            </tr>
+          </thead>
+          <tbody id="ledger-tbody">
+            <!-- Populated by JS -->
+          </tbody>
+        </table>
+      </div>
     </div>
   </div>
 </div>
@@ -1459,52 +1836,262 @@ HTML_PAGE = """<!DOCTYPE html>
     `;
   }
 
-  function renderHistory(bots) {
-    const container = document.getElementById("history-container");
+  function renderExposure(exp) {
+    const container = document.getElementById("exposure-container");
+    if (!container || !exp) return;
+
+    let segsHtml = "";
+    let legendHtml = "";
+
+    if (exp.assets && exp.assets.length > 0) {
+      segsHtml = exp.assets.map(a => `<div class="exposure-seg" style="width:${a.pct}%;background:${a.color}" title="${a.name}: $${a.value_usd} (${a.pct}%)"></div>`).join("");
+      legendHtml = exp.assets.map(a => `
+        <div class="exposure-item">
+          <span class="exposure-dot" style="background:${a.color}"></span>
+          <span>${a.name}: <strong>$${a.value_usd.toFixed(2)}</strong> <small style="color:var(--text-dim)">(${a.pct}%)</small></span>
+        </div>
+      `).join("");
+    }
+
+    container.innerHTML = `
+      <div class="analytics-header">
+        <span class="analytics-title">🛡️ Exposición & Asignación de Capital ($${exp.total_usd.toFixed(2)} USD)</span>
+        <div style="display:flex;gap:14px;font-size:0.75rem">
+          <span style="color:var(--accent-amber)">● En Tokens: <strong>$${exp.token_usd.toFixed(2)}</strong> (${exp.token_pct}%)</span>
+          <span style="color:var(--accent-green)">● En Liquidez: <strong>$${exp.liquidity_usd.toFixed(2)}</strong> (${exp.liquidity_pct}%)</span>
+        </div>
+      </div>
+      <div class="exposure-wrap">
+        <div class="exposure-bar">${segsHtml}</div>
+        <div class="exposure-legend">${legendHtml}</div>
+      </div>
+    `;
+  }
+
+  function renderSliders(bots) {
+    const container = document.getElementById("sliders-container");
+    if (!container || !bots) return;
+
     let html = "";
-    
     bots.forEach(b => {
-      let rows = "";
-      if (b.history && b.history.length > 0) {
-        b.history.slice().reverse().forEach(h => {
-          const rsiColor = h.rsi <= 25 ? 'color:#10b981;font-weight:bold' : (h.rsi >= 75 ? 'color:#ef4444;font-weight:bold' : 'color:#cbd5e1');
-          rows += `
-            <tr>
-              <td>${h.time}</td>
-              <td>${h.price}</td>
-              <td style="${rsiColor}">${h.rsi.toFixed(2)}</td>
-              <td><span style="font-size:0.65rem;color:${h.state === 'WAITING_SELL' ? '#fbbf24' : '#38bdf8'}">${h.state === 'WAITING_SELL' ? 'VENTA' : 'COMPRA'}</span></td>
-            </tr>
-          `;
-        });
-      } else {
-        rows = `<tr><td colspan="4" style="text-align:center;color:var(--text-dim)">Sin registros</td></tr>`;
+      let stateBadge = "";
+      let trackContent = "";
+      let pinHtml = "";
+      let subLeft = "";
+      let subRight = "";
+      let subCenter = "";
+
+      // Icons
+      const icon = b.id === "pepe" ? "🐸" : (b.id === "sui" ? "💧" : (b.id === "pi" ? "🥧" : "🦅"));
+
+      // 1. WAITING_BUY
+      if (b.state === "WAITING_BUY") {
+        stateBadge = `<span class="badge-status badge-waiting-buy">Esperando Compra</span>`;
+        const targetRsi = b.rsi_buy || (b.id === "raven" ? 30.0 : 28.0);
+        const rsi = Math.max(0, Math.min(100, b.rsi || 50));
+        const ptsLeft = rsi - targetRsi;
+        const isTrigger = ptsLeft <= 0;
+        
+        const pinColor = isTrigger ? "var(--accent-green)" : (ptsLeft <= 8 ? "var(--accent-cyan)" : "var(--accent-red)");
+        const pinText = isTrigger ? "¡ZONA COMPRA!" : `RSI ${rsi.toFixed(1)} (faltan ${ptsLeft.toFixed(1)} pts)`;
+
+        trackContent = `
+          <div style="width:30%;height:100%;background:rgba(16,185,129,0.25);border-right:2px solid var(--accent-green);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
+            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">ZONA COMPRA ≤${targetRsi}</span>
+          </div>
+          <div style="width:40%;height:100%;display:flex;align-items:center;justify-content:center">
+            <span style="font-size:0.58rem;color:var(--text-dim)">NEUTRO (50)</span>
+          </div>
+          <div style="width:30%;height:100%;background:rgba(239,68,68,0.2);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
+            <span style="font-size:0.58rem;color:var(--accent-red)">SOBRECOMPRADO</span>
+          </div>
+        `;
+
+        pinHtml = `
+          <div class="slider-pin" style="left:${rsi}%">
+            <div class="slider-pin-badge" style="background:${pinColor}">${pinText}</div>
+            <div class="slider-pin-arrow" style="background:${pinColor}"></div>
+          </div>
+        `;
+
+        subLeft = `<span style="color:var(--accent-green)">🎯 Gatillo: RSI ≤ ${targetRsi}</span>`;
+        subRight = `<span>Saldo: <strong>${Number(b.quote_balance).toFixed(2)} ${b.quote_symbol}</strong></span>`;
+      }
+      // 2. WAITING_SELL INTERMEDIATE (Tranches < Max)
+      else if (b.state === "WAITING_SELL" && (b.tranches_filled || 1) < (b.max_tranches || 3)) {
+        const trFilled = b.tranches_filled || 1;
+        const maxTr = b.max_tranches || 3;
+        stateBadge = `<span class="badge-status badge-waiting-sell">Posición (Tramo ${trFilled}/${maxTr})</span>`;
+
+        const nextDrop = Math.abs(b.next_dca_pnl || 4.0);
+        const tp = b.take_profit_pct || 8.0;
+        const pnl = b.pnl_pct || 0.0;
+
+        let pinPct = 50;
+        if (pnl < 0) {
+          pinPct = 50 + (pnl / nextDrop) * 42;
+        } else {
+          pinPct = 50 + (pnl / tp) * 42;
+        }
+        pinPct = Math.max(6, Math.min(94, pinPct));
+
+        const pinColor = pnl >= 0 ? "var(--accent-green)" : (pnl >= -nextDrop/2 ? "var(--accent-amber)" : "var(--accent-red)");
+        const pinText = `${b.symbol.split('/')[0]} ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`;
+
+        trackContent = `
+          <div style="width:50%;height:100%;background:linear-gradient(to right, rgba(6,182,212,0.3), rgba(30,41,59,0.3));border-left:3px solid var(--accent-cyan);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
+            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-cyan)">◄ TRAMO ${trFilled+1} (-${nextDrop}%)</span>
+          </div>
+          <div style="position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;background:#94a3b8;z-index:5" title="Precio de entrada: ${b.buy_price_formatted}"></div>
+          <div style="width:50%;height:100%;background:linear-gradient(to left, rgba(16,185,129,0.3), rgba(30,41,59,0.3));border-right:3px solid var(--accent-green);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
+            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">VENTA TP (+${tp}%) ►</span>
+          </div>
+        `;
+
+        pinHtml = `
+          <div class="slider-pin" style="left:${pinPct}%">
+            <div class="slider-pin-badge" style="background:${pinColor}">${pinText}</div>
+            <div class="slider-pin-arrow" style="background:${pinColor}"></div>
+          </div>
+        `;
+
+        const distDca = (pnl - (-nextDrop)).toFixed(1);
+        const distTp = (tp - pnl).toFixed(1);
+        subLeft = `<span style="color:var(--accent-cyan)">A Tramo ${trFilled+1}: <strong>-${distDca}%</strong></span>`;
+        subCenter = `<span>Costo: ${b.buy_price_formatted}</span>`;
+        subRight = `<span style="color:var(--accent-green)">A Venta: <strong>+${distTp}%</strong></span>`;
+      }
+      // 3. WAITING_SELL FULL (Tranches filled, no Trailing yet)
+      else if (b.state === "WAITING_SELL" && (!b.trailing_stop_pnl)) {
+        const trFilled = b.tranches_filled || (b.max_tranches || 3);
+        const maxTr = b.max_tranches || 3;
+        stateBadge = `<span class="badge-status badge-waiting-sell">Cupo Completo (${trFilled}/${maxTr})</span>`;
+
+        const pnl = b.pnl_pct || 0.0;
+        const tp = b.take_profit_pct || 8.0;
+
+        // Map range from -16% to +tp%
+        const minScale = -16.0;
+        let pinPct = ((pnl - minScale) / (tp - minScale)) * 100;
+        pinPct = Math.max(6, Math.min(94, pinPct));
+
+        const zeroPct = ((0.0 - minScale) / (tp - minScale)) * 100;
+        const pinColor = pnl >= 0 ? "var(--accent-green)" : (pnl >= -8 ? "var(--accent-amber)" : "var(--accent-red)");
+        const pinText = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}% (${b.price_formatted})`;
+
+        trackContent = `
+          <div style="width:${zeroPct}%;height:100%;background:rgba(239,68,68,0.15);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
+            <span style="font-size:0.58rem;color:var(--accent-red)">ZONA RETRACCIÓN</span>
+          </div>
+          <div style="position:absolute;left:${zeroPct}%;top:-3px;bottom:-3px;width:2px;background:#94a3b8;z-index:5" title="Break-even / Costo Medio"></div>
+          <div style="width:${100 - zeroPct}%;height:100%;background:rgba(16,185,129,0.25);border-right:3px solid var(--accent-green);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
+            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">TARGET +${tp}%</span>
+          </div>
+        `;
+
+        pinHtml = `
+          <div class="slider-pin" style="left:${pinPct}%">
+            <div class="slider-pin-badge" style="background:${pinColor}">${pinText}</div>
+            <div class="slider-pin-arrow" style="background:${pinColor}"></div>
+          </div>
+        `;
+
+        const toBreakeven = Math.abs(pnl).toFixed(1);
+        const toTarget = (tp - pnl).toFixed(1);
+        subLeft = `<span style="color:var(--accent-amber)">Break-even: <strong>+${toBreakeven}%</strong></span>`;
+        subRight = `<span style="color:var(--accent-green)">Target TP: <strong>+${toTarget}%</strong></span>`;
+      }
+      // 4. WAITING_SELL WITH TRAILING STOP
+      else {
+        stateBadge = `<span class="badge-status badge-waiting-sell" style="background:rgba(16,185,129,0.15);color:var(--accent-green);border-color:var(--accent-green)">Trailing Activo 🚀</span>`;
+        const pnl = b.pnl_pct || 0.0;
+        const floor = b.trailing_stop_pnl || 1.5;
+        const peak = b.max_pnl_seen || pnl;
+
+        trackContent = `
+          <div style="width:50%;height:100%;background:rgba(16,185,129,0.25);border-left:3px solid var(--accent-green);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
+            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">PISO PROTEGIDO (+${Number(floor).toFixed(1)}%)</span>
+          </div>
+          <div style="width:50%;height:100%;background:linear-gradient(to right, rgba(16,185,129,0.25), rgba(6,182,212,0.3));display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
+            <span style="font-size:0.58rem;color:var(--accent-cyan)">PICO +${Number(peak).toFixed(1)}%</span>
+          </div>
+        `;
+
+        pinHtml = `
+          <div class="slider-pin" style="left:75%">
+            <div class="slider-pin-badge" style="background:var(--accent-green)">+${pnl.toFixed(2)}%</div>
+            <div class="slider-pin-arrow" style="background:var(--accent-green)"></div>
+          </div>
+        `;
+
+        subLeft = `<span style="color:var(--accent-green)">🛡️ Piso Asegurado: <strong>+${Number(floor).toFixed(1)}%</strong></span>`;
+        subRight = `<span style="color:var(--accent-cyan)">Pico Visto: <strong>+${Number(peak).toFixed(1)}%</strong></span>`;
       }
 
       html += `
-        <div class="history-col">
-          <h4>
-            <span>${b.symbol}</span>
-            <span style="font-size:0.7rem;color:var(--text-dim)">${b.mode}</span>
-          </h4>
-          <table class="history-table">
-            <thead>
-              <tr>
-                <th>Hora</th>
-                <th>Precio</th>
-                <th>RSI</th>
-                <th>Estado</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${rows}
-            </tbody>
-          </table>
+        <div class="slider-box">
+          <div class="slider-top">
+            <span class="slider-sym"><span>${icon}</span> ${b.symbol}</span>
+            ${stateBadge}
+          </div>
+          <div class="slider-track-wrap">
+            <div class="slider-track">
+              ${trackContent}
+              ${pinHtml}
+            </div>
+          </div>
+          <div class="slider-sub">
+            ${subLeft}
+            ${subCenter ? `<span>${subCenter}</span>` : ""}
+            ${subRight}
+          </div>
         </div>
       `;
     });
 
     container.innerHTML = html;
+  }
+
+  function renderLedger(trades) {
+    const tbody = document.getElementById("ledger-tbody");
+    if (!tbody) return;
+
+    if (!trades || trades.length === 0) {
+      tbody.innerHTML = `<tr><td colspan="6" style="text-align:center;color:var(--text-dim);padding:14px">Sin operaciones registradas</td></tr>`;
+      return;
+    }
+
+    let rows = "";
+    trades.forEach(t => {
+      const isSell = t.action.toUpperCase() === "SELL";
+      const badgeClass = isSell ? "badge-sell" : "badge-buy";
+      const icon = t.symbol.includes("PEPE") ? "🐸" : (t.symbol.includes("SUI") ? "💧" : (t.symbol.includes("PI") ? "🥧" : "🦅"));
+      
+      let resText = "—";
+      let resColor = "color:var(--text-dim)";
+      if (isSell && t.profit_pct) {
+        const pNum = parseFloat(t.profit_pct);
+        const sign = pNum >= 0 ? "+" : "";
+        resText = `${sign}${t.profit_pct}`;
+        resColor = pNum >= 0 ? "color:var(--accent-green);font-weight:700" : "color:var(--accent-red);font-weight:700";
+      }
+
+      const pFormatted = Number(t.price) < 0.001 ? `$${Number(t.price).toFixed(8)}` : `$${Number(t.price).toFixed(4)}`;
+      const amtFormatted = Number(t.usdt_value).toFixed(2);
+
+      rows += `
+        <tr>
+          <td style="color:var(--text-dim)">${t.timestamp}</td>
+          <td><strong>${icon} ${t.symbol}</strong></td>
+          <td><span class="badge-trade ${badgeClass}">${t.action}</span></td>
+          <td style="text-align:right">${pFormatted}</td>
+          <td style="text-align:right">$${amtFormatted}</td>
+          <td style="text-align:right;${resColor}">${resText}</td>
+        </tr>
+      `;
+    });
+
+    tbody.innerHTML = rows;
   }
 
   async function fetchData() {
@@ -1561,8 +2148,18 @@ HTML_PAGE = """<!DOCTYPE html>
         currentBotsData = data.bots;
         const cardsHtml = data.bots.map(b => renderCard(b)).join("");
         document.getElementById("bots-container").innerHTML = cardsHtml;
-        renderHistory(data.bots);
         updateCountdowns();
+      }
+
+      // Render Enhanced Analytics Sections
+      if (data.exposure) {
+        renderExposure(data.exposure);
+      }
+      if (data.bots) {
+        renderSliders(data.bots);
+      }
+      if (data.trades) {
+        renderLedger(data.trades);
       }
 
       countdownTimer = 20;
@@ -1637,9 +2234,9 @@ HTML_PAGE = """<!DOCTYPE html>
 
   // Scroll toggle button logic
   function toggleScroll() {
-    const hist = document.querySelector('.history-card');
+    const sec = document.getElementById('analytics-section');
     if (window.scrollY < 80) {
-      if (hist) hist.scrollIntoView({ behavior: 'smooth' });
+      if (sec) sec.scrollIntoView({ behavior: 'smooth' });
     } else {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
@@ -1654,7 +2251,7 @@ HTML_PAGE = """<!DOCTYPE html>
       btnText.textContent = 'Volver a Indicadores';
     } else {
       btnIcon.textContent = '▼';
-      btnText.textContent = 'Ver Historial de Velas Recientes';
+      btnText.textContent = 'Ver Exposición, Gatillos y Registro de Trades';
     }
   });
 
