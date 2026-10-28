@@ -27,10 +27,11 @@ PAIRS = {
         "mode": os.getenv("SUI_MODE", "REAL"),
         "initial_usdt": 110.0,
         "take_profit_pct": 8.0,      # Dynamic TP milestone (+8%)
-        "trailing_trigger_pct": 5.0, # Activate trailing stop at +5%
-        "trailing_delta_pct": 2.5,   # Trailing distance (peak - 2.5%)
-        "rsi_buy": 28.0,             # Relaxed from 25
-        "rsi_sell": 70.0,
+        "trailing_trigger_pct": 4.0, # Calibrated: Activate trailing stop at +4%
+        "trailing_delta_pct": 2.0,   # Trailing distance (peak - 2.0%)
+        "rsi_buy": 28.0,             # Relaxed entry threshold
+        "rsi_sell": 75.0,            # Calibrated from 70.0 to capture full wave
+        "min_rsi_pnl": 2.0,          # Minimum PnL to allow RSI overbought exit
         "dca_tranches": [0.40, 0.30, 0.30], # 40% initial, 30% dip 1, 30% dip 2
         "dca_drops": [0.0, 4.0, 8.0]        # Entry, -4%, -8%
     },
@@ -39,10 +40,11 @@ PAIRS = {
         "mode": os.getenv("PEPE_MODE", "REAL"),
         "initial_usdt": 80.0,
         "take_profit_pct": 12.0,     # Dynamic TP milestone (+12%)
-        "trailing_trigger_pct": 7.0, # Activate trailing stop at +7%
-        "trailing_delta_pct": 3.5,   # Trailing distance (peak - 3.5%)
-        "rsi_buy": 28.0,             # Relaxed from 25
-        "rsi_sell": 72.0,
+        "trailing_trigger_pct": 5.0, # Calibrated: Activate trailing stop at +5% (down from 7%)
+        "trailing_delta_pct": 2.5,   # Trailing distance (peak - 2.5%)
+        "rsi_buy": 28.0,             # Relaxed entry threshold
+        "rsi_sell": 75.0,            # Calibrated from 72.0
+        "min_rsi_pnl": 3.5,          # Calibrated: Minimum PnL to allow RSI exit (gives air to trailing)
         "dca_tranches": [0.40, 0.30, 0.30],
         "dca_drops": [0.0, 4.5, 9.0]
     }
@@ -383,7 +385,7 @@ def run_multi_bot_cycle(exchange, state):
                 exit_reason = f"Trailing Stop Activado (+{profit_pct:.2f}%, pico fue +{p_state['max_pnl_seen']:.2f}%)"
                 
             # Rule 3: Technical Overbought Exit (RSI > sell_threshold and profit > +1.5%)
-            elif rsi >= cfg["rsi_sell"] and profit_pct >= 1.5:
+            elif rsi >= cfg["rsi_sell"] and profit_pct >= cfg.get("min_rsi_pnl", 1.5):
                 exit_reason = f"Sobrecompra Técnica RSI ({rsi:.2f} >= {cfg['rsi_sell']} y PnL +{profit_pct:.2f}%)"
                 
             if exit_reason:

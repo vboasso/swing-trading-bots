@@ -569,7 +569,7 @@ def get_all_bot_data():
     sui_data["tranches_filled"] = s_live_info.get("tranches_filled", 3 if sui_data["state"] == "WAITING_SELL" else 0)
     sui_data["max_tranches"] = 3
     sui_data["take_profit_pct"] = 8.0
-    sui_data["trailing_trigger_pct"] = 5.0
+    sui_data["trailing_trigger_pct"] = 4.0
     sui_data["trailing_stop_pnl"] = s_live_info.get("trailing_stop_pnl")
     sui_data["max_pnl_seen"] = safe_float(s_live_info.get("max_pnl_seen", 0.0))
     sui_data["rsi_buy"] = 28.0
@@ -581,7 +581,7 @@ def get_all_bot_data():
     pepe_data["tranches_filled"] = p_live_info.get("tranches_filled", 0)
     pepe_data["max_tranches"] = 3
     pepe_data["take_profit_pct"] = 12.0
-    pepe_data["trailing_trigger_pct"] = 7.0
+    pepe_data["trailing_trigger_pct"] = 5.0
     pepe_data["trailing_stop_pnl"] = p_live_info.get("trailing_stop_pnl")
     pepe_data["max_pnl_seen"] = safe_float(p_live_info.get("max_pnl_seen", 0.0))
     pepe_data["rsi_buy"] = 28.0
