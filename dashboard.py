@@ -1252,42 +1252,44 @@ HTML_PAGE = """<!DOCTYPE html>
 
     .slider-track-wrap {
       position: relative;
-      margin: 18px 0 10px;
-      padding: 0 4px;
+      margin: 28px 4px 10px;
+      padding: 0;
     }
 
     .slider-track {
       width: 100%;
-      height: 16px;
-      border-radius: 10px;
-      background: #1a2333;
+      height: 14px;
+      border-radius: 8px;
+      background: #141b29;
       position: relative;
-      overflow: visible;
+      overflow: hidden;
       display: flex;
-      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.5);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.6);
     }
 
     .slider-pin {
       position: absolute;
-      top: -16px;
+      bottom: calc(100% + 2px);
       transform: translateX(-50%);
       display: flex;
       flex-direction: column;
       align-items: center;
-      z-index: 10;
+      z-index: 20;
       pointer-events: none;
     }
 
     .slider-pin-badge {
-      font-size: 0.65rem;
+      font-size: 0.62rem;
       font-weight: 800;
       font-family: var(--font-mono);
-      padding: 2px 7px;
-      border-radius: 6px;
+      padding: 2px 6px;
+      border-radius: 5px;
       color: #0a0e17;
       white-space: nowrap;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
-      border: 1px solid rgba(255, 255, 255, 0.2);
+      box-shadow: 0 3px 8px rgba(0, 0, 0, 0.7);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      line-height: 1.2;
     }
 
     .slider-pin-arrow {
@@ -1295,7 +1297,7 @@ HTML_PAGE = """<!DOCTYPE html>
       height: 6px;
       transform: rotate(45deg);
       margin-top: -3px;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.4);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.4);
     }
 
     .slider-sub {
@@ -1881,7 +1883,6 @@ HTML_PAGE = """<!DOCTYPE html>
       let subRight = "";
       let subCenter = "";
 
-      // Icons
       const icon = b.id === "pepe" ? "🐸" : (b.id === "sui" ? "💧" : (b.id === "pi" ? "🥧" : "🦅"));
 
       // 1. WAITING_BUY
@@ -1893,22 +1894,23 @@ HTML_PAGE = """<!DOCTYPE html>
         const isTrigger = ptsLeft <= 0;
         
         const pinColor = isTrigger ? "var(--accent-green)" : (ptsLeft <= 8 ? "var(--accent-cyan)" : "var(--accent-red)");
-        const pinText = isTrigger ? "¡ZONA COMPRA!" : `RSI ${rsi.toFixed(1)} (faltan ${ptsLeft.toFixed(1)} pts)`;
+        const pinText = isTrigger ? "¡ZONA COMPRA!" : `RSI ${rsi.toFixed(1)} (a ${ptsLeft.toFixed(1)} pts)`;
 
         trackContent = `
-          <div style="width:30%;height:100%;background:rgba(16,185,129,0.25);border-right:2px solid var(--accent-green);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
-            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">ZONA COMPRA ≤${targetRsi}</span>
+          <div style="width:30%;height:100%;background:rgba(16,185,129,0.3);border-right:2px solid var(--accent-green);display:flex;align-items:center;padding-left:6px">
+            <span style="font-size:0.56rem;font-weight:700;color:var(--accent-green)">≤${targetRsi} COMPRA</span>
           </div>
-          <div style="width:40%;height:100%;display:flex;align-items:center;justify-content:center">
-            <span style="font-size:0.58rem;color:var(--text-dim)">NEUTRO (50)</span>
+          <div style="width:40%;height:100%;background:rgba(30,41,59,0.4);display:flex;align-items:center;justify-content:center">
+            <span style="font-size:0.56rem;color:var(--text-dim)">50</span>
           </div>
-          <div style="width:30%;height:100%;background:rgba(239,68,68,0.2);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
-            <span style="font-size:0.58rem;color:var(--accent-red)">SOBRECOMPRADO</span>
+          <div style="width:30%;height:100%;background:rgba(239,68,68,0.25);border-left:2px solid var(--accent-red);display:flex;align-items:center;justify-content:flex-end;padding-right:6px">
+            <span style="font-size:0.56rem;color:var(--accent-red);font-weight:600">≥70</span>
           </div>
         `;
 
+        const clampedPin = Math.max(16, Math.min(84, rsi));
         pinHtml = `
-          <div class="slider-pin" style="left:${rsi}%">
+          <div class="slider-pin" style="left:${clampedPin}%">
             <div class="slider-pin-badge" style="background:${pinColor}">${pinText}</div>
             <div class="slider-pin-arrow" style="background:${pinColor}"></div>
           </div>
@@ -1929,27 +1931,27 @@ HTML_PAGE = """<!DOCTYPE html>
 
         let pinPct = 50;
         if (pnl < 0) {
-          pinPct = 50 + (pnl / nextDrop) * 42;
+          pinPct = 50 + (pnl / nextDrop) * 40;
         } else {
-          pinPct = 50 + (pnl / tp) * 42;
+          pinPct = 50 + (pnl / tp) * 40;
         }
-        pinPct = Math.max(6, Math.min(94, pinPct));
+        const clampedPin = Math.max(16, Math.min(84, pinPct));
 
         const pinColor = pnl >= 0 ? "var(--accent-green)" : (pnl >= -nextDrop/2 ? "var(--accent-amber)" : "var(--accent-red)");
         const pinText = `${b.symbol.split('/')[0]} ${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}%`;
 
         trackContent = `
-          <div style="width:50%;height:100%;background:linear-gradient(to right, rgba(6,182,212,0.3), rgba(30,41,59,0.3));border-left:3px solid var(--accent-cyan);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
-            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-cyan)">◄ TRAMO ${trFilled+1} (-${nextDrop}%)</span>
+          <div style="width:50%;height:100%;background:linear-gradient(to right, rgba(6,182,212,0.35), rgba(30,41,59,0.3));border-left:3px solid var(--accent-cyan);display:flex;align-items:center;padding-left:6px">
+            <span style="font-size:0.56rem;font-weight:700;color:var(--accent-cyan)">◄ T${trFilled+1} (-${nextDrop}%)</span>
           </div>
-          <div style="position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;background:#94a3b8;z-index:5" title="Precio de entrada: ${b.buy_price_formatted}"></div>
-          <div style="width:50%;height:100%;background:linear-gradient(to left, rgba(16,185,129,0.3), rgba(30,41,59,0.3));border-right:3px solid var(--accent-green);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
-            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">VENTA TP (+${tp}%) ►</span>
+          <div style="position:absolute;left:50%;top:0;bottom:0;width:2px;background:#cbd5e1;z-index:5" title="Entrada"></div>
+          <div style="width:50%;height:100%;background:linear-gradient(to left, rgba(16,185,129,0.35), rgba(30,41,59,0.3));border-right:3px solid var(--accent-green);display:flex;align-items:center;justify-content:flex-end;padding-right:6px">
+            <span style="font-size:0.56rem;font-weight:700;color:var(--accent-green)">TP +${tp}% ►</span>
           </div>
         `;
 
         pinHtml = `
-          <div class="slider-pin" style="left:${pinPct}%">
+          <div class="slider-pin" style="left:${clampedPin}%">
             <div class="slider-pin-badge" style="background:${pinColor}">${pinText}</div>
             <div class="slider-pin-arrow" style="background:${pinColor}"></div>
           </div>
@@ -1970,27 +1972,26 @@ HTML_PAGE = """<!DOCTYPE html>
         const pnl = b.pnl_pct || 0.0;
         const tp = b.take_profit_pct || 8.0;
 
-        // Map range from -16% to +tp%
         const minScale = -16.0;
         let pinPct = ((pnl - minScale) / (tp - minScale)) * 100;
-        pinPct = Math.max(6, Math.min(94, pinPct));
+        const clampedPin = Math.max(16, Math.min(84, pinPct));
 
         const zeroPct = ((0.0 - minScale) / (tp - minScale)) * 100;
         const pinColor = pnl >= 0 ? "var(--accent-green)" : (pnl >= -8 ? "var(--accent-amber)" : "var(--accent-red)");
         const pinText = `${pnl >= 0 ? '+' : ''}${pnl.toFixed(2)}% (${b.price_formatted})`;
 
         trackContent = `
-          <div style="width:${zeroPct}%;height:100%;background:rgba(239,68,68,0.15);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
-            <span style="font-size:0.58rem;color:var(--accent-red)">ZONA RETRACCIÓN</span>
+          <div style="width:${zeroPct}%;height:100%;background:rgba(239,68,68,0.2);display:flex;align-items:center;padding-left:6px">
+            <span style="font-size:0.56rem;color:var(--accent-red);font-weight:600">RETRACCIÓN</span>
           </div>
-          <div style="position:absolute;left:${zeroPct}%;top:-3px;bottom:-3px;width:2px;background:#94a3b8;z-index:5" title="Break-even / Costo Medio"></div>
-          <div style="width:${100 - zeroPct}%;height:100%;background:rgba(16,185,129,0.25);border-right:3px solid var(--accent-green);display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
-            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">TARGET +${tp}%</span>
+          <div style="position:absolute;left:${zeroPct}%;top:0;bottom:0;width:2px;background:#cbd5e1;z-index:5" title="Break-even / Costo Medio"></div>
+          <div style="width:${100 - zeroPct}%;height:100%;background:rgba(16,185,129,0.3);border-right:3px solid var(--accent-green);display:flex;align-items:center;justify-content:flex-end;padding-right:6px">
+            <span style="font-size:0.56rem;font-weight:700;color:var(--accent-green)">TARGET +${tp}%</span>
           </div>
         `;
 
         pinHtml = `
-          <div class="slider-pin" style="left:${pinPct}%">
+          <div class="slider-pin" style="left:${clampedPin}%">
             <div class="slider-pin-badge" style="background:${pinColor}">${pinText}</div>
             <div class="slider-pin-arrow" style="background:${pinColor}"></div>
           </div>
@@ -2009,16 +2010,16 @@ HTML_PAGE = """<!DOCTYPE html>
         const peak = b.max_pnl_seen || pnl;
 
         trackContent = `
-          <div style="width:50%;height:100%;background:rgba(16,185,129,0.25);border-left:3px solid var(--accent-green);display:flex;align-items:center;padding-left:6px;border-radius:10px 0 0 10px">
-            <span style="font-size:0.58rem;font-weight:700;color:var(--accent-green)">PISO PROTEGIDO (+${Number(floor).toFixed(1)}%)</span>
+          <div style="width:50%;height:100%;background:rgba(16,185,129,0.3);border-left:3px solid var(--accent-green);display:flex;align-items:center;padding-left:6px">
+            <span style="font-size:0.56rem;font-weight:700;color:var(--accent-green)">PISO +${Number(floor).toFixed(1)}%</span>
           </div>
-          <div style="width:50%;height:100%;background:linear-gradient(to right, rgba(16,185,129,0.25), rgba(6,182,212,0.3));display:flex;align-items:center;justify-content:flex-end;padding-right:6px;border-radius:0 10px 10px 0">
-            <span style="font-size:0.58rem;color:var(--accent-cyan)">PICO +${Number(peak).toFixed(1)}%</span>
+          <div style="width:50%;height:100%;background:linear-gradient(to right, rgba(16,185,129,0.3), rgba(6,182,212,0.3));display:flex;align-items:center;justify-content:flex-end;padding-right:6px">
+            <span style="font-size:0.56rem;color:var(--accent-cyan);font-weight:600">PICO +${Number(peak).toFixed(1)}%</span>
           </div>
         `;
 
         pinHtml = `
-          <div class="slider-pin" style="left:75%">
+          <div class="slider-pin" style="left:72%">
             <div class="slider-pin-badge" style="background:var(--accent-green)">+${pnl.toFixed(2)}%</div>
             <div class="slider-pin-arrow" style="background:var(--accent-green)"></div>
           </div>
@@ -2037,8 +2038,8 @@ HTML_PAGE = """<!DOCTYPE html>
           <div class="slider-track-wrap">
             <div class="slider-track">
               ${trackContent}
-              ${pinHtml}
             </div>
+            ${pinHtml}
           </div>
           <div class="slider-sub">
             ${subLeft}
