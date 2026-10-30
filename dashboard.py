@@ -282,12 +282,12 @@ def get_all_bot_data():
         "mode": "REAL",
         "exchange": "PancakeSwap DEX",
         "price": 0.0,
-        "price_formatted": "0.00 BNB",
+        "price_formatted": "$0.00",
         "rsi": 50.0,
         "state": "UNKNOWN",
         "state_label": "Desconocido",
         "buy_price": 0.0,
-        "buy_price_formatted": "0.00 BNB",
+        "buy_price_formatted": "—",
         "pnl_pct": 0.0,
         "token_balance": 0.0,
         "quote_balance": 0.0,
@@ -299,7 +299,7 @@ def get_all_bot_data():
 
     raven_entry = read_entry_price(RAVEN_BUY_PRICE)
     raven_data["buy_price"] = raven_entry
-    raven_data["buy_price_formatted"] = f"{raven_entry:.8f} BNB" if raven_entry > 0 else "—"
+    raven_data["buy_price_formatted"] = f"${raven_entry:.8f}" if raven_entry > 0 else "—"
 
     raven_lines = read_last_lines(RAVEN_HISTORY, 15)
     if raven_lines:
@@ -309,7 +309,7 @@ def get_all_bot_data():
             if len(last) >= 6:
                 raven_data["last_update"] = last[0]
                 raven_data["price"] = safe_float(last[1])
-                raven_data["price_formatted"] = f"{safe_float(last[1]):.8f} BNB"
+                raven_data["price_formatted"] = f"${safe_float(last[1]):.8f}"
                 raven_data["rsi"] = safe_float(last[2])
                 raven_data["state"] = last[3]
                 raven_data["token_balance"] = safe_float(last[4])
@@ -337,10 +337,29 @@ def get_all_bot_data():
                 if len(parts) >= 6:
                     raven_data["history"].append({
                         "time": parts[0].split(" ")[-1] if " " in parts[0] else parts[0],
-                        "price": f"{safe_float(parts[1]):.8f}",
+                        "price": f"${safe_float(parts[1]):.8f}",
                         "rsi": safe_float(parts[2]),
                         "state": parts[3],
                     })
+
+    # Enforce authoritative live state from .raven_state.json
+    raven_state_file = os.path.join(BASE_DIR, ".raven_state.json")
+    raven_rst = {}
+    if os.path.exists(raven_state_file):
+        try:
+            with open(raven_state_file) as rf:
+                raven_rst = json.load(rf)
+        except Exception:
+            pass
+    if raven_rst.get("tranches_filled", 0) > 0 and raven_rst.get("buy_price", 0.0) > 0:
+        raven_data["state"] = "WAITING_SELL"
+        r_tr = raven_rst.get("tranches_filled", 1)
+        raven_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {r_tr}/2]"
+        if raven_data["buy_price"] == 0.0:
+            raven_data["buy_price"] = raven_rst.get("buy_price", 0.0)
+            raven_data["buy_price_formatted"] = f"${raven_data['buy_price']:.8f}"
+        if raven_data["price"] > 0 and raven_data["buy_price"] > 0:
+            raven_data["pnl_pct"] = round(((raven_data["price"] - raven_data["buy_price"]) / raven_data["buy_price"]) * 100, 2)
 
     # --- 3 & 4. SUI & PEPE (Paper Bot) ---
     paper_state_data = {}
@@ -555,14 +574,15 @@ def get_all_bot_data():
     pi_data["next_dca_pnl"] = -6.0 if pi_data["tranches_filled"] == 1 else None
 
     # Raven DEX
-    raven_data["tranches_filled"] = 1 if raven_data["state"] == "WAITING_SELL" else 0
-    raven_data["max_tranches"] = 1
+    r_tr_filled = raven_rst.get("tranches_filled", 1 if raven_data["state"] == "WAITING_SELL" else 0)
+    raven_data["tranches_filled"] = r_tr_filled
+    raven_data["max_tranches"] = 2
     raven_data["take_profit_pct"] = 15.0
     raven_data["trailing_trigger_pct"] = 10.0
-    raven_data["trailing_stop_pnl"] = None
-    raven_data["max_pnl_seen"] = 0.0
-    raven_data["rsi_buy"] = 30.0
-    raven_data["next_dca_pnl"] = None
+    raven_data["trailing_stop_pnl"] = raven_rst.get("trailing_stop_pnl")
+    raven_data["max_pnl_seen"] = safe_float(raven_rst.get("max_pnl_seen", 0.0))
+    raven_data["rsi_buy"] = 28.0
+    raven_data["next_dca_pnl"] = -6.0 if r_tr_filled == 1 else None
 
     # SUI Network
     s_live_info = paper_state_data.get("SUI/USDT", {})
@@ -593,7 +613,7 @@ def get_all_bot_data():
     pi_tok_val = pi_data["token_balance"] * pi_data["price"]
     sui_tok_val = sui_data["token_balance"] * sui_data["price"]
     pepe_tok_val = pepe_data["token_balance"] * pepe_data["price"]
-    raven_tok_val = (raven_data["token_balance"] * raven_data["price"] * 530.0) if raven_data["token_balance"] > 0 else 0.0
+    raven_tok_val = (raven_data["token_balance"] * raven_data["price"]) if raven_data["token_balance"] > 0 else 0.0
     
     token_capital_usd = round(pi_tok_val + sui_tok_val + pepe_tok_val + raven_tok_val, 2)
     liquidity_capital_usd = round(max(0.0, total_cap - token_capital_usd), 2)
@@ -603,7 +623,7 @@ def get_all_bot_data():
     pi_total_usd = pi_tok_val + pi_data["quote_balance"]
     sui_total_usd = sui_tok_val + sui_data["quote_balance"]
     pepe_total_usd = pepe_tok_val + pepe_data["quote_balance"]
-    raven_bnb_quote_usd = raven_data["quote_balance"] * 530.0
+    raven_bnb_quote_usd = raven_data["quote_balance"] * 700.0
     raven_total_usd = raven_tok_val + raven_bnb_quote_usd
 
     exposure_data = {

@@ -275,13 +275,23 @@ def execute_buy(current_price, pct_of_balance=0.60, tranche_idx=1):
             f"📈 *Precio real tramo:* `${real_price:.8f}`\n"
             f"🔗 Hash: `{web3.to_hex(tx_hash)}`"
         )
+        try:
+            trades_file = "/home/vale/paper_trades.csv"
+            file_exists = os.path.isfile(trades_file)
+            with open(trades_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['timestamp', 'symbol', 'action', 'price', 'amount', 'usdt_value', 'profit_pct', 'mode'])
+                writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'RAVEN/BNB', 'BUY', f"{real_price:.8f}", f"{tokens_received:.2f}", f"{usd_spent:.2f}", '0.00%', 'REAL'])
+        except Exception as te:
+            logging.error(f"Error recording buy to trades CSV: {te}")
         return real_price, tokens_received, human_bnb
     except Exception as e:
         logging.error(f"Buy execution failed: {e}")
         send_telegram_message(f"❌ *ERROR DE COMPRA RAVEN*\nDetalle: `{e}`")
         return None, 0.0, 0.0
 
-def execute_sell(current_price, reason="Take Profit"):
+def execute_sell(current_price, reason="Take Profit", buy_price=0.0):
     if not PRIVATE_KEY or not WALLET_ADDRESS:
         return False
     logging.info(f"Executing SELL (RAVEN -> BNB) | Reason: {reason}")
@@ -337,6 +347,7 @@ def execute_sell(current_price, reason="Take Profit"):
             
         usd_received = bnb_received * bnb_usd
         real_sell_price = (usd_received / human_raven) if human_raven > 0 else current_price
+        pnl_pct = ((real_sell_price - buy_price) / buy_price) * 100 if buy_price > 0 else 0.0
         
         send_telegram_message(
             f"🔴 *VENTA DE RAVEN EJECUTADA*\n"
@@ -344,8 +355,19 @@ def execute_sell(current_price, reason="Take Profit"):
             f"🔹 Tokens vendidos: `{human_raven:,.2f} RAVEN`\n"
             f"🔹 BNB recibido: `{bnb_received:.4f} BNB` (${usd_received:.2f} USD)\n"
             f"📈 *Precio real de venta:* `${real_sell_price:.8f}`\n"
+            f"📊 *Resultado:* `{pnl_pct:+.2f}%`\n"
             f"🔗 Hash: `{web3.to_hex(tx_hash)}`"
         )
+        try:
+            trades_file = "/home/vale/paper_trades.csv"
+            file_exists = os.path.isfile(trades_file)
+            with open(trades_file, mode='a', newline='') as f:
+                writer = csv.writer(f)
+                if not file_exists:
+                    writer.writerow(['timestamp', 'symbol', 'action', 'price', 'amount', 'usdt_value', 'profit_pct', 'mode'])
+                writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'RAVEN/BNB', 'SELL', f"{real_sell_price:.8f}", f"{human_raven:.2f}", f"{usd_received:.2f}", f"{pnl_pct:+.2f}%", 'REAL'])
+        except Exception as te:
+            logging.error(f"Error recording sell to trades CSV: {te}")
         return True
     except Exception as e:
         logging.error(f"Sell execution failed: {e}")
@@ -427,6 +449,12 @@ def main():
                                 state_data["total_bnb_spent"] = bnb_spent
                                 save_state(state_data)
                                 state = "WAITING_SELL"
+                                try:
+                                    with open(csv_file, mode='a', newline='') as f:
+                                        writer = csv.writer(f)
+                                        writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{current_price:.8f}", f"{rsi:.2f}", state, f"{tokens:.0f}", f"{bnb_balance - bnb_spent:.4f}"])
+                                except Exception as e_csv:
+                                    logging.error(f"Error logging immediate CSV on buy: {e_csv}")
                     else:
                         logging.info("Not enough BNB above gas reserve to trade.")
                         
@@ -456,6 +484,12 @@ def main():
                                     f"🔹 Tokens agregados: `{tokens2:,.2f} RAVEN`\n"
                                     f"📊 *Precio Promedio Ponderado:* `${new_avg_price:.8f}`"
                                 )
+                                try:
+                                    with open(csv_file, mode='a', newline='') as f:
+                                        writer = csv.writer(f)
+                                        writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{current_price:.8f}", f"{rsi:.2f}", state, f"{new_total_tokens:.0f}", f"{bnb_balance - bnb_spent2:.4f}"])
+                                except Exception as e_csv:
+                                    logging.error(f"Error logging immediate CSV on DCA buy: {e_csv}")
                                 profit_pct = ((current_price - new_avg_price) / new_avg_price) * 100
 
                     # Standard 15m candle exit evaluation
@@ -467,7 +501,8 @@ def main():
                         
                     if sell_reason:
                         logging.info(f"15m Sell condition met: {sell_reason}")
-                        if execute_sell(current_price, reason=sell_reason):
+                        current_buy = state_data.get("buy_price", current_price)
+                        if execute_sell(current_price, reason=sell_reason, buy_price=current_buy):
                             state_data = {
                                 "buy_price": 0.0,
                                 "buy_time": None,
@@ -478,6 +513,12 @@ def main():
                             }
                             save_state(state_data)
                             state = "WAITING_BUY"
+                            try:
+                                with open(csv_file, mode='a', newline='') as f:
+                                    writer = csv.writer(f)
+                                    writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{current_price:.8f}", f"{rsi:.2f}", state, "0", f"{bnb_balance:.4f}"])
+                            except Exception as e_csv:
+                                logging.error(f"Error logging immediate CSV on sell: {e_csv}")
             else:
                 logging.warning("Not enough data to calculate RSI yet.")
                 
@@ -525,7 +566,7 @@ def main():
                                     f"📈 Ganancia: `+{profit_pct:.2f}%`\n"
                                     f"🚀 Ejecutando venta inmediata..."
                                 )
-                                if execute_sell(spot_price, reason=fast_exit_reason):
+                                if execute_sell(spot_price, reason=fast_exit_reason, buy_price=buy_price):
                                     state_data = {
                                         "buy_price": 0.0,
                                         "buy_time": None,
@@ -536,6 +577,12 @@ def main():
                                     }
                                     save_state(state_data)
                                     state = "WAITING_BUY"
+                                    try:
+                                        with open(csv_file, mode='a', newline='') as f:
+                                            writer = csv.writer(f)
+                                            writer.writerow([datetime.now().strftime("%Y-%m-%d %H:%M:%S"), f"{spot_price:.8f}", "50.0", state, "0", f"{bnb_balance:.4f}"])
+                                    except Exception as e_csv:
+                                        logging.error(f"Error logging immediate CSV on fast sell: {e_csv}")
                                     break
                     except Exception as e_fast:
                         logging.warning(f"Warning in fast on-chain check: {e_fast}")
