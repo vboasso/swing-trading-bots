@@ -115,7 +115,7 @@ def main():
         'timeout': 6000,
     })
 
-    bitget_symbols = ['PEPE/USDT', 'SUI/USDT', 'PI/USDT']
+    bitget_symbols = ['PEPE/USDT', 'SUI/USDT', 'SOL/USDT', 'PI/USDT']
 
     while True:
         cycle_start = time.time()

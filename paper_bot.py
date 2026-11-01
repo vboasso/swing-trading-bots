@@ -47,6 +47,19 @@ PAIRS = {
         "min_rsi_pnl": 3.5,          # Calibrated: Minimum PnL to allow RSI exit (gives air to trailing)
         "dca_tranches": [0.40, 0.30, 0.30],
         "dca_drops": [0.0, 4.5, 9.0]
+    },
+    "SOL/USDT": {
+        "name": "SOL",
+        "mode": os.getenv("SOL_MODE", "REAL"),
+        "initial_usdt": 140.0,
+        "take_profit_pct": 6.0,       # Dynamic TP milestone (+6%)
+        "trailing_trigger_pct": 3.5,  # Activate trailing stop at +3.5%
+        "trailing_delta_pct": 1.5,    # Trailing distance (peak - 1.5%)
+        "rsi_buy": 28.0,              # Relaxed entry threshold
+        "rsi_sell": 72.0,             # Technical overbought exit
+        "min_rsi_pnl": 2.0,           # Minimum PnL to allow RSI exit
+        "dca_tranches": [0.40, 0.30, 0.30], # 40% initial, 30% dip 1, 30% dip 2
+        "dca_drops": [0.0, 3.5, 7.0]        # Entry, -3.5%, -7.0%
     }
 }
 

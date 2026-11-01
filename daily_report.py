@@ -154,50 +154,43 @@ def fetch_data():
     except Exception as e:
         msg += f"🦅 *RAVEN BOT:* Error al cargar (`{e}`)\n\n"
 
-    # ================= 2. PI BOT (Bitget Spot) =================
+    # ================= 2. SOL BOT (Bitget Spot) =================
     try:
         balance = exchange.fetch_balance()
-        pi_balance = balance['total'].get('PI', 0.0)
+        sol_balance = balance['total'].get('SOL', 0.0)
         usdt_total_free = balance['total'].get('USDT', 0.0)
         
-        ticker_pi = exchange.fetch_ticker('PI/USDT')
-        price_pi = ticker_pi['last']
-        val_pi_usdt = pi_balance * price_pi
-        total_capital += val_pi_usdt
+        ticker_sol = exchange.fetch_ticker('SOL/USDT')
+        price_sol = ticker_sol['last']
+        val_sol = sol_balance * price_sol
+        total_capital += val_sol
         
-        buy_p_pi = 0.0
-        days_held_pi = 0.0
-        tranches_pi = 1
-        if os.path.exists(PI_STATE_FILE):
+        paper_state = {}
+        if os.path.exists(PAPER_STATE_FILE):
             try:
-                with open(PI_STATE_FILE) as f:
-                    p_st = json.load(f)
-                    buy_p_pi = safe_float(p_st.get("buy_price", 0.0))
-                    tranches_pi = p_st.get("tranches_filled", 1)
-                    if p_st.get("buy_time"):
-                        b_dt = datetime.strptime(p_st["buy_time"].split(".")[0], "%Y-%m-%d %H:%M:%S")
-                        days_held_pi = (datetime.now() - b_dt).total_seconds() / 86400.0
+                with open(PAPER_STATE_FILE) as f:
+                    paper_state = json.load(f)
             except:
                 pass
                 
-        pnl_pi = ((price_pi - buy_p_pi) / buy_p_pi) * 100 if buy_p_pi > 0 else 0.0
-        log_pi = get_last_clean_log("pibot")
+        sol_st = paper_state.get('SOL/USDT', {})
+        sol_mode = sol_st.get('mode', 'REAL')
+        sol_buy_p = safe_float(sol_st.get('buy_price', 0.0))
+        sol_tranches = sol_st.get('tranches_filled', 0)
+        sol_usdt_alloc = safe_float(sol_st.get('usdt_balance', 140.0))
         
-        msg += "🟣 *PI BOT (Bitget Spot)*\n"
-        if pi_balance > 10:
-            pnl_icon = "🟢" if pnl_pi >= 0 else "🔴"
-            msg += f"🔹 PI: `{pi_balance:,.2f}` (${val_pi_usdt:,.2f} USDT) [Tramo {tranches_pi}/2]\n"
-            msg += f"🔹 PnL Posición: `{pnl_pi:+.2f}%` {pnl_icon} (Entrada: ${buy_p_pi:.4f})\n"
-            if days_held_pi > 0:
-                msg += f"⏱ Retención: `{days_held_pi:.1f} días`\n"
+        msg += f'?? *SOL BOT (Bitget Spot - {sol_mode})*\n'
+        if sol_balance > 0.05 or (sol_st.get('state') == 'WAITING_SELL' and sol_buy_p > 0):
+            pnl_sol = ((price_sol - sol_buy_p) / sol_buy_p) * 100 if sol_buy_p > 0 else 0.0
+            pnl_icon = '??' if pnl_sol >= 0 else '??'
+            msg += f'?? SOL: `{sol_balance:,.4f}` (${val_sol:,.2f} USDT) [Tramo {sol_tranches}/3]\n'
+            msg += f'?? PnL Posici?n: `{pnl_sol:+.2f}%` {pnl_icon} (Entrada: ${sol_buy_p:.2f})\n'
         else:
-            msg += f"🔹 Estado: `En Liquidez (Esperando Compra)`\n"
-            msg += f"🔹 Presupuesto Asignado: `65.00 USDT`\n"
-        msg += f"📈 Precio: `${price_pi:.4f}`\n"
-        msg += f"📝 Estado: `{log_pi}`\n\n"
+            msg += f'?? Estado: `En Liquidez (Esperando Compra)`\n'
+            msg += f'?? Presupuesto Asignado: `${sol_usdt_alloc:,.2f} USDT`\n'
+        msg += f'?? Precio: `${price_sol:.2f}`\n\n'
     except Exception as e:
-        msg += f"🟣 *PI BOT:* Error al cargar (`{e}`)\n\n"
-
+        msg += f'?? *SOL BOT:* Error al cargar (`{e}`)\n\n'
     # ================= 3 & 4. SUI & PEPE BOTS (Bitget Spot) =================
     paper_state = {}
     if os.path.exists(PAPER_STATE_FILE):
@@ -264,7 +257,7 @@ def fetch_data():
     # ================= 5. LIQUIDEZ Y PORTFOLIO SUMMARY =================
     total_capital += usdt_total_free
     msg += f"💵 *USDT Total en Bitget:* `${usdt_total_free:,.2f} USDT`\n"
-    msg += f"   *(Asignado: $110.00 SUI | $80.00 PEPE)*\n\n"
+    msg += f"   *(Asignado: $110.00 SUI | $89.20 PEPE | $140.00 SOL)*\n\n"
 
     pct_daily, pct_weekly, pct_total, initial_cap = calculate_variations(total_capital)
     

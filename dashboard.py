@@ -204,75 +204,46 @@ def get_system_stats():
 def get_all_bot_data():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # --- 1. PI / USDT ---
-    pi_data = {
-        "id": "pi",
-        "name": "Pi Network",
-        "symbol": "PI/USDT",
-        "mode": "REAL",
-        "exchange": "Bitget",
-        "price": 0.0,
-        "price_formatted": "$0.00",
-        "rsi": 50.0,
-        "state": "UNKNOWN",
-        "state_label": "Desconocido",
-        "buy_price": 0.0,
-        "buy_price_formatted": "$0.00",
-        "pnl_pct": 0.0,
-        "token_balance": 0.0,
-        "quote_balance": 0.0,
-        "token_symbol": "PI",
-        "quote_symbol": "USDT",
-        "last_update": "N/A",
-        "history": [],
+    paper_state_data = {}
+    if os.path.exists(PAPER_STATE):
+        try:
+            with open(PAPER_STATE, "r", encoding="utf-8") as f:
+                paper_state_data = json.load(f)
+        except Exception:
+            pass
+
+    # --- 1. SOL / USDT (Reemplaza a Pi Bot) ---
+    sol_live_info = paper_state_data.get('SOL/USDT', {})
+    sol_buy = safe_float(sol_live_info.get('buy_price', 0.0))
+    sol_data = {
+        'id': 'sol',
+        'name': 'Solana',
+        'symbol': 'SOL/USDT',
+        'mode': sol_live_info.get('mode', 'REAL'),
+        'exchange': 'Bitget',
+        'price': 0.0,
+        'price_formatted': '$0.00',
+        'rsi': 50.0,
+        'state': sol_live_info.get('state', 'WAITING_BUY'),
+        'state_label': 'En Liquidez (Esperando Compra)',
+        'buy_price': sol_buy,
+        'buy_price_formatted': f'${sol_buy:.2f}' if sol_buy > 0 else '?',
+        'pnl_pct': 0.0,
+        'token_balance': safe_float(sol_live_info.get('token_balance', 0.0)),
+        'quote_balance': safe_float(sol_live_info.get('usdt_balance', 140.0)),
+        'token_symbol': 'SOL',
+        'quote_symbol': 'USDT',
+        'last_update': 'N/A',
+        'history': [],
+        'tranches_filled': sol_live_info.get('tranches_filled', 0),
+        'max_tranches': 3,
+        'take_profit_pct': 6.0,
+        'trailing_trigger_pct': 3.5,
+        'trailing_stop_pnl': sol_live_info.get('trailing_stop_pnl'),
+        'max_pnl_seen': safe_float(sol_live_info.get('max_pnl_seen', 0.0)),
+        'rsi_buy': 28.0,
+        'next_dca_pnl': -3.5 if sol_live_info.get('tranches_filled', 0) == 1 else (-7.0 if sol_live_info.get('tranches_filled', 0) == 2 else None)
     }
-
-    pi_entry = read_entry_price(PI_BUY_PRICE)
-    pi_data["buy_price"] = pi_entry
-    pi_data["buy_price_formatted"] = f"${pi_entry:.4f}" if pi_entry > 0 else "—"
-
-    pi_lines = read_last_lines(PI_HISTORY, 15)
-    if pi_lines:
-        # Check header
-        data_lines = [l for l in pi_lines if not l.startswith("timestamp")]
-        if data_lines:
-            last = data_lines[-1].split(",")
-            if len(last) >= 6:
-                pi_data["last_update"] = last[0]
-                pi_data["price"] = safe_float(last[1])
-                pi_data["price_formatted"] = f"${safe_float(last[1]):.4f}"
-                pi_data["rsi"] = safe_float(last[2])
-                pi_data["state"] = last[3]
-                pi_data["token_balance"] = safe_float(last[4])
-                pi_data["quote_balance"] = safe_float(last[5])
-
-                if pi_data["state"] == "WAITING_SELL":
-                    pi_tranche_label = ""
-                    pi_state_file = os.path.join(BASE_DIR, ".pi_state.json")
-                    if os.path.exists(pi_state_file):
-                        try:
-                            with open(pi_state_file) as pf:
-                                pst = json.load(pf)
-                                pi_tranche_label = f" [Tramo {pst.get('tranches_filled', 1)}/2]"
-                        except Exception:
-                            pass
-                    pi_data["state_label"] = f"En Posición (Esperando Venta){pi_tranche_label}"
-                    if pi_entry > 0 and pi_data["price"] > 0:
-                        pi_data["pnl_pct"] = round(((pi_data["price"] - pi_entry) / pi_entry) * 100, 2)
-                elif pi_data["state"] == "WAITING_BUY":
-                    pi_data["state_label"] = "En Liquidez (Esperando Compra)"
-                    pi_data["pnl_pct"] = 0.0
-
-            # Parse last 5 for history table
-            for row_str in data_lines[-5:]:
-                parts = row_str.split(",")
-                if len(parts) >= 6:
-                    pi_data["history"].append({
-                        "time": parts[0].split(" ")[-1] if " " in parts[0] else parts[0],
-                        "price": f"${safe_float(parts[1]):.4f}",
-                        "rsi": safe_float(parts[2]),
-                        "state": parts[3],
-                    })
 
     # --- 2. RAVEN / BNB ---
     raven_data = {
@@ -433,6 +404,18 @@ def get_all_bot_data():
         sui_data["trades_count"] = s_info.get("trades_count", 0)
         sui_data["realized_pnl_usd"] = safe_float(s_info.get("realized_pnl_usd", 0.0))
 
+    if "SOL/USDT" in paper_state_data:
+        sol_live = paper_state_data["SOL/USDT"]
+        sol_tok = safe_float(sol_live.get("token_balance", 0.0))
+        sol_st = sol_live.get("state", "WAITING_BUY") if sol_tok > 0 else "WAITING_BUY"
+        sol_data["state"] = sol_st
+        sol_tr = sol_live.get("tranches_filled", 1)
+        sol_data["state_label"] = f"En Posici?n (Esperando Venta) [Tramo {sol_tr}/3]" if sol_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+        if sol_st == "WAITING_SELL" and sol_data["buy_price"] > 0 and sol_data["price"] > 0:
+            sol_data["pnl_pct"] = round(((sol_data["price"] - sol_data["buy_price"]) / sol_data["buy_price"]) * 100, 2)
+        else:
+            sol_data["pnl_pct"] = 0.0
+
     if "PEPE/USDT" in paper_state_data:
         p_info = paper_state_data["PEPE/USDT"]
         pepe_mode = p_info.get("mode", "PAPER")
@@ -477,6 +460,23 @@ def get_all_bot_data():
                         "state": st_val,
                     })
 
+                elif sym == "SOL/USDT":
+                    sol_data["last_update"] = t_str
+                    sol_data["price"] = p_val
+                    sol_data["price_formatted"] = f"${p_val:.2f}"
+                    sol_data["rsi"] = r_val
+                    sol_data["state"] = st_val
+                    sol_tr = paper_state_data.get("SOL/USDT", {}).get("tranches_filled", 1)
+                    sol_data["state_label"] = f"En Posici?n (Esperando Venta) [Tramo {sol_tr}/3]" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+                    if st_val == "WAITING_SELL" and sol_data["buy_price"] > 0:
+                        sol_data["pnl_pct"] = round(((p_val - sol_data["buy_price"]) / sol_data["buy_price"]) * 100, 2)
+                    sol_data["history"].append({
+                        "time": t_str.split(" ")[-1] if " " in t_str else t_str,
+                        "price": f"${p_val:.2f}",
+                        "rsi": r_val,
+                        "state": st_val,
+                    })
+
                 elif sym == "PEPE/USDT":
                     pepe_data["last_update"] = t_str
                     pepe_data["price"] = p_val
@@ -496,6 +496,7 @@ def get_all_bot_data():
 
         sui_data["history"] = sui_data["history"][-5:]
         pepe_data["history"] = pepe_data["history"][-5:]
+        sol_data["history"] = sol_data["history"][-5:]
 
     # Enforce authoritative live state from paper_state_data (JSON)
     if "SUI/USDT" in paper_state_data:
@@ -509,6 +510,18 @@ def get_all_bot_data():
             sui_data["pnl_pct"] = round(((sui_data["price"] - sui_data["buy_price"]) / sui_data["buy_price"]) * 100, 2)
         else:
             sui_data["pnl_pct"] = 0.0
+
+    if "SOL/USDT" in paper_state_data:
+        sol_live = paper_state_data["SOL/USDT"]
+        sol_tok = safe_float(sol_live.get("token_balance", 0.0))
+        sol_st = sol_live.get("state", "WAITING_BUY") if sol_tok > 0 else "WAITING_BUY"
+        sol_data["state"] = sol_st
+        sol_tr = sol_live.get("tranches_filled", 1)
+        sol_data["state_label"] = f"En Posici?n (Esperando Venta) [Tramo {sol_tr}/3]" if sol_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+        if sol_st == "WAITING_SELL" and sol_data["buy_price"] > 0 and sol_data["price"] > 0:
+            sol_data["pnl_pct"] = round(((sol_data["price"] - sol_data["buy_price"]) / sol_data["buy_price"]) * 100, 2)
+        else:
+            sol_data["pnl_pct"] = 0.0
 
     if "PEPE/USDT" in paper_state_data:
         p_live = paper_state_data["PEPE/USDT"]
@@ -555,23 +568,16 @@ def get_all_bot_data():
             pass
 
     # Enrich parameters for decision sliders
-    # Pi Network
-    pi_pst_file = os.path.join(BASE_DIR, ".pi_state.json")
-    pi_pst = {}
-    if os.path.exists(pi_pst_file):
-        try:
-            with open(pi_pst_file) as pf:
-                pi_pst = json.load(pf)
-        except Exception:
-            pass
-    pi_data["tranches_filled"] = pi_pst.get("tranches_filled", 2 if pi_data["state"] == "WAITING_SELL" else 0)
-    pi_data["max_tranches"] = 2
-    pi_data["take_profit_pct"] = 8.0
-    pi_data["trailing_trigger_pct"] = 5.0
-    pi_data["trailing_stop_pnl"] = pi_pst.get("trailing_stop_pnl")
-    pi_data["max_pnl_seen"] = safe_float(pi_pst.get("max_pnl_seen", 0.0))
-    pi_data["rsi_buy"] = 28.0
-    pi_data["next_dca_pnl"] = -6.0 if pi_data["tranches_filled"] == 1 else None
+    # Solana
+    s_sol_info = paper_state_data.get('SOL/USDT', {})
+    sol_data['tranches_filled'] = s_sol_info.get('tranches_filled', 1 if sol_data['state'] == 'WAITING_SELL' else 0)
+    sol_data['max_tranches'] = 3
+    sol_data['take_profit_pct'] = 6.0
+    sol_data['trailing_trigger_pct'] = 3.5
+    sol_data['trailing_stop_pnl'] = s_sol_info.get('trailing_stop_pnl')
+    sol_data['max_pnl_seen'] = safe_float(s_sol_info.get('max_pnl_seen', 0.0))
+    sol_data['rsi_buy'] = 28.0
+    sol_data['next_dca_pnl'] = -3.5 if sol_data['tranches_filled'] == 1 else (-7.0 if sol_data['tranches_filled'] == 2 else None)
 
     # Raven DEX
     r_tr_filled = raven_rst.get("tranches_filled", 1 if raven_data["state"] == "WAITING_SELL" else 0)
@@ -610,17 +616,17 @@ def get_all_bot_data():
 
     # Compute Portfolio Exposure
     total_cap = capital_info["current"]
-    pi_tok_val = pi_data["token_balance"] * pi_data["price"]
+    sol_tok_val = sol_data["token_balance"] * sol_data["price"]
     sui_tok_val = sui_data["token_balance"] * sui_data["price"]
     pepe_tok_val = pepe_data["token_balance"] * pepe_data["price"]
     raven_tok_val = (raven_data["token_balance"] * raven_data["price"]) if raven_data["token_balance"] > 0 else 0.0
     
-    token_capital_usd = round(pi_tok_val + sui_tok_val + pepe_tok_val + raven_tok_val, 2)
+    token_capital_usd = round(sol_tok_val + sui_tok_val + pepe_tok_val + raven_tok_val, 2)
     liquidity_capital_usd = round(max(0.0, total_cap - token_capital_usd), 2)
     token_pct = round((token_capital_usd / total_cap) * 100, 1) if total_cap > 0 else 0.0
     liquidity_pct = round(100.0 - token_pct, 1)
 
-    pi_total_usd = pi_tok_val + pi_data["quote_balance"]
+    sol_total_usd = sol_tok_val + sol_data["quote_balance"]
     sui_total_usd = sui_tok_val + sui_data["quote_balance"]
     pepe_total_usd = pepe_tok_val + pepe_data["quote_balance"]
     raven_bnb_quote_usd = raven_data["quote_balance"] * 700.0
@@ -633,7 +639,7 @@ def get_all_bot_data():
         "liquidity_usd": liquidity_capital_usd,
         "liquidity_pct": liquidity_pct,
         "assets": [
-            {"id": "pi", "name": "PI", "symbol": "PI/USDT", "value_usd": round(pi_total_usd, 2), "pct": round((pi_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-amber)"},
+            {"id": "sol", "name": "SOL", "symbol": "SOL/USDT", "value_usd": round(sol_total_usd, 2), "pct": round((sol_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-purple, #9945FF)"},
             {"id": "sui", "name": "SUI", "symbol": "SUI/USDT", "value_usd": round(sui_total_usd, 2), "pct": round((sui_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-blue)"},
             {"id": "pepe", "name": "PEPE", "symbol": "PEPE/USDT", "value_usd": round(pepe_total_usd, 2), "pct": round((pepe_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-green)"},
             {"id": "raven", "name": "RAVEN", "symbol": "RAVEN/BNB", "value_usd": round(raven_total_usd, 2), "pct": round((raven_total_usd / total_cap)*100, 1) if total_cap > 0 else 0, "color": "var(--accent-cyan)"}
@@ -647,7 +653,7 @@ def get_all_bot_data():
         "exposure": exposure_data,
         "trades": get_trades_ledger(10),
         "tunnel_url": tunnel_url,
-        "bots": [pi_data, raven_data, sui_data, pepe_data],
+        "bots": [sol_data, raven_data, sui_data, pepe_data],
     }
 
 
