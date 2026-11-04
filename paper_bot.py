@@ -328,7 +328,8 @@ def run_multi_bot_cycle(exchange, state):
                 drop_target = cfg["dca_drops"][next_tranche_idx]
                 
                 # Trigger DCA if price dropped past threshold and RSI is low (< 35) or capitulating (< 25)
-                if (profit_pct <= -drop_target and rsi < 35) or rsi < 25:
+                # Enforce real price drop below target before scaling in
+                if profit_pct <= -drop_target and rsi < 35:
                     tranche_pct = cfg["dca_tranches"][next_tranche_idx] / sum(cfg["dca_tranches"][next_tranche_idx:])
                     usdt_to_spend = p_state["usdt_balance"] * tranche_pct
                     
