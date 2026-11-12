@@ -44,17 +44,17 @@ def generate_report():
             pass
 
     msg = (
-        "?? *RECORDATORIO DE RECALIBRACI?N DE BOTS* ??\n\n"
-        f"El *Market Data Lake* ha alcanzado el hito de evaluaci?n programada ({days_collected} d?as acumulados):\n\n"
-        f"?? *Velas 1m capturadas:* `{candles:,}`\n"
-        f"?? *Snapshots Orderbook:* `{orderbooks:,}`\n"
-        f"?? *M?tricas Macro:* `{macros:,}`\n"
-        f"?? *Tama?o en Disco:* `{size_mb:.2f} MB`\n\n"
-        "?? *Objetivos de optimizaci?n:*\n"
-        "1. **SUI & PEPE:** Volatilidad real emp?rica vs espaciado de tranches DCA.\n"
+        "🎯 *RECORDATORIO DE RECALIBRACIÓN DE BOTS* 🎯\n\n"
+        f"El *Market Data Lake* ha alcanzado el hito de evaluación programada ({days_collected} días acumulados):\n\n"
+        f"📊 *Velas 1m capturadas:* `{candles:,}`\n"
+        f"📖 *Snapshots Orderbook:* `{orderbooks:,}`\n"
+        f"🌐 *Métricas Macro:* `{macros:,}`\n"
+        f"💾 *Tamaño en Disco:* `{size_mb:.2f} MB`\n\n"
+        "💡 *Objetivos de optimización:*\n"
+        "1. **SUI & PEPE:** Volatilidad real empírica vs espaciado de tranches DCA.\n"
         "2. **RAVEN/BNB:** Profundidad de liquidez en PancakeSwap, spread real y slippage.\n"
-        "3. **PI/USDT:** Reevaluar rangos de soporte y bandas de seguridad en Bitget.\n\n"
-        "?? _Listo para correr el an?lisis cuantitativo con Antigravity._"
+        "3. **SOL/USDT:** Evaluar velas de 5m vs 15m, Trailing Stop y gatillos RSI.\n\n"
+        "🚀 _Listo para correr el análisis cuantitativo con Antigravity._"
     )
     return msg
 

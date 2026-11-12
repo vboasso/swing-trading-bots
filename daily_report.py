@@ -179,18 +179,18 @@ def fetch_data():
         sol_tranches = sol_st.get('tranches_filled', 0)
         sol_usdt_alloc = safe_float(sol_st.get('usdt_balance', 140.0))
         
-        msg += f'?? *SOL BOT (Bitget Spot - {sol_mode})*\n'
+        msg += f'☀️ *SOL BOT (Bitget Spot - {sol_mode})*\n'
         if sol_balance > 0.05 or (sol_st.get('state') == 'WAITING_SELL' and sol_buy_p > 0):
             pnl_sol = ((price_sol - sol_buy_p) / sol_buy_p) * 100 if sol_buy_p > 0 else 0.0
-            pnl_icon = '??' if pnl_sol >= 0 else '??'
-            msg += f'?? SOL: `{sol_balance:,.4f}` (${val_sol:,.2f} USDT) [Tramo {sol_tranches}/3]\n'
-            msg += f'?? PnL Posici?n: `{pnl_sol:+.2f}%` {pnl_icon} (Entrada: ${sol_buy_p:.2f})\n'
+            pnl_icon = '🟢' if pnl_sol >= 0 else '🔴'
+            msg += f'🔹 SOL: `{sol_balance:,.4f}` (${val_sol:,.2f} USDT) [Tramo {sol_tranches}/3]\n'
+            msg += f'🔹 PnL Posición: `{pnl_sol:+.2f}%` {pnl_icon} (Entrada: ${sol_buy_p:.2f})\n'
         else:
-            msg += f'?? Estado: `En Liquidez (Esperando Compra)`\n'
-            msg += f'?? Presupuesto Asignado: `${sol_usdt_alloc:,.2f} USDT`\n'
-        msg += f'?? Precio: `${price_sol:.2f}`\n\n'
+            msg += f'🔹 Estado: `En Liquidez (Esperando Compra)`\n'
+            msg += f'🔹 Presupuesto Asignado: `${sol_usdt_alloc:,.2f} USDT`\n'
+        msg += f'📈 Precio: `${price_sol:.2f}`\n\n'
     except Exception as e:
-        msg += f'?? *SOL BOT:* Error al cargar (`{e}`)\n\n'
+        msg += f'☀️ *SOL BOT:* Error al cargar (`{e}`)\n\n'
     # ================= 3 & 4. SUI & PEPE BOTS (Bitget Spot) =================
     paper_state = {}
     if os.path.exists(PAPER_STATE_FILE):

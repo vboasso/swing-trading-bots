@@ -227,7 +227,7 @@ def get_all_bot_data():
         'state': sol_live_info.get('state', 'WAITING_BUY'),
         'state_label': 'En Liquidez (Esperando Compra)',
         'buy_price': sol_buy,
-        'buy_price_formatted': f'${sol_buy:.2f}' if sol_buy > 0 else '?',
+        'buy_price_formatted': f'${sol_buy:.2f}' if sol_buy > 0 else '—',
         'pnl_pct': 0.0,
         'token_balance': safe_float(sol_live_info.get('token_balance', 0.0)),
         'quote_balance': safe_float(sol_live_info.get('usdt_balance', 140.0)),
@@ -410,7 +410,7 @@ def get_all_bot_data():
         sol_st = sol_live.get("state", "WAITING_BUY") if sol_tok > 0 else "WAITING_BUY"
         sol_data["state"] = sol_st
         sol_tr = sol_live.get("tranches_filled", 1)
-        sol_data["state_label"] = f"En Posici?n (Esperando Venta) [Tramo {sol_tr}/3]" if sol_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+        sol_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {sol_tr}/3]" if sol_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
         if sol_st == "WAITING_SELL" and sol_data["buy_price"] > 0 and sol_data["price"] > 0:
             sol_data["pnl_pct"] = round(((sol_data["price"] - sol_data["buy_price"]) / sol_data["buy_price"]) * 100, 2)
         else:
@@ -467,7 +467,7 @@ def get_all_bot_data():
                     sol_data["rsi"] = r_val
                     sol_data["state"] = st_val
                     sol_tr = paper_state_data.get("SOL/USDT", {}).get("tranches_filled", 1)
-                    sol_data["state_label"] = f"En Posici?n (Esperando Venta) [Tramo {sol_tr}/3]" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+                    sol_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {sol_tr}/3]" if st_val == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
                     if st_val == "WAITING_SELL" and sol_data["buy_price"] > 0:
                         sol_data["pnl_pct"] = round(((p_val - sol_data["buy_price"]) / sol_data["buy_price"]) * 100, 2)
                     sol_data["history"].append({
@@ -517,7 +517,7 @@ def get_all_bot_data():
         sol_st = sol_live.get("state", "WAITING_BUY") if sol_tok > 0 else "WAITING_BUY"
         sol_data["state"] = sol_st
         sol_tr = sol_live.get("tranches_filled", 1)
-        sol_data["state_label"] = f"En Posici?n (Esperando Venta) [Tramo {sol_tr}/3]" if sol_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
+        sol_data["state_label"] = f"En Posición (Esperando Venta) [Tramo {sol_tr}/3]" if sol_st == "WAITING_SELL" else "En Liquidez (Esperando Compra)"
         if sol_st == "WAITING_SELL" and sol_data["buy_price"] > 0 and sol_data["price"] > 0:
             sol_data["pnl_pct"] = round(((sol_data["price"] - sol_data["buy_price"]) / sol_data["buy_price"]) * 100, 2)
         else:
