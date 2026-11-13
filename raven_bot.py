@@ -77,14 +77,17 @@ def get_bnb_usd():
             pass
     return _last_bnb_usd
 
-def fetch_onchain_spot_price():
+def fetch_onchain_spot_price(raven_amount_tokens=None):
     try:
         router = web3.eth.contract(address=web3.to_checksum_address(ROUTER_ADDRESS), abi=ROUTER_ABI)
+        tokens = raven_amount_tokens if raven_amount_tokens and raven_amount_tokens > 0 else 1.0
+        amount_in = int(tokens * (10**18))
         out = router.functions.getAmountsOut(
-            10**18,
+            amount_in,
             [web3.to_checksum_address(RAVEN_ADDRESS), web3.to_checksum_address(WBNB_ADDRESS)]
         ).call()
-        bnb_per_raven = out[1] / (10**18)
+        bnb_received = out[1] / (10**18)
+        bnb_per_raven = bnb_received / tokens
         bnb_usd = get_bnb_usd()
         return bnb_per_raven * bnb_usd
     except Exception as e:
@@ -320,9 +323,22 @@ def execute_sell(current_price, reason="Take Profit", buy_price=0.0):
             web3.eth.send_raw_transaction(signed_approve.raw_transaction)
             time.sleep(10)
             
+        # Slippage guard: calculate expected BNB from router quote and enforce 2.5% max slippage
+        try:
+            quote_out = router.functions.getAmountsOut(
+                balance,
+                [web3.to_checksum_address(RAVEN_ADDRESS), web3.to_checksum_address(WBNB_ADDRESS)]
+            ).call()
+            expected_bnb_wei = quote_out[1]
+            min_bnb_wei = int(expected_bnb_wei * 0.975)  # 2.5% slippage protection
+            logging.info(f"Slippage guard: Quoted {expected_bnb_wei / 1e18:.6f} BNB | Min Out: {min_bnb_wei / 1e18:.6f} BNB")
+        except Exception as e_quote:
+            logging.warning(f"Could not calculate slippage guard: {e_quote}")
+            min_bnb_wei = 0
+
         tx = router.functions.swapExactTokensForETHSupportingFeeOnTransferTokens(
             balance,
-            0,
+            min_bnb_wei,
             [web3.to_checksum_address(RAVEN_ADDRESS), web3.to_checksum_address(WBNB_ADDRESS)],
             account.address,
             int(time.time()) + 600
@@ -463,7 +479,7 @@ def main():
                     # Check Tranche 2 scale-in
                     tranches = state_data.get("tranches_filled", 1)
                     if tranches < 2 and bnb_balance > 0.03:
-                        if (profit_pct <= -6.0 and rsi < 35) or rsi < 25:
+                        if profit_pct <= -6.0 and rsi < 35:
                             logging.info(f"DCA condition met for RAVEN Tranche 2. PnL: {profit_pct:.2f}% | RSI: {rsi:.2f}. Executing Buy...")
                             real_price2, tokens2, bnb_spent2 = execute_buy(current_price, pct_of_balance=0.90, tranche_idx=2)
                             if real_price2:
@@ -527,14 +543,17 @@ def main():
             # --- High-Frequency On-Chain Monitoring (15s spot check) ---
             if state == "WAITING_SELL":
                 buy_price = state_data.get("buy_price", 0.0)
-                logging.info(f"⚡ Holding RAVEN: Entering 15s high-frequency on-chain monitoring (Entry: ${buy_price:.8f})...")
+                logging.info(f"⚡ Holding RAVEN: Entering 15s high-frequency on-chain monitoring (Entry: ${buy_price:.8f}, Position: {raven_balance:,.0f} RAVEN)...")
                 start_cycle = time.time()
                 check_count = 0
+                MIN_TRAILING_PROFIT = 3.0  # Hard profit floor: Trailing stop CANNOT sell below +3.0% net
+                
                 while (time.time() - start_cycle) < 900:
                     time.sleep(15)
                     check_count += 1
                     try:
-                        spot_price = fetch_onchain_spot_price()
+                        # Effective spot price accounting for full position size and pool price impact
+                        spot_price = fetch_onchain_spot_price(raven_amount_tokens=raven_balance)
                         if spot_price and buy_price > 0:
                             profit_pct = ((spot_price - buy_price) / buy_price) * 100
                             
@@ -542,7 +561,8 @@ def main():
                             if profit_pct > state_data.get("max_pnl_seen", 0.0):
                                 state_data["max_pnl_seen"] = profit_pct
                                 if profit_pct >= 10.0:
-                                    state_data["trailing_stop_pnl"] = max(state_data.get("trailing_stop_pnl") or 0.0, profit_pct - 4.0)
+                                    # Arm trailing stop at (peak - 3.5%), guaranteed >= MIN_TRAILING_PROFIT
+                                    state_data["trailing_stop_pnl"] = max(MIN_TRAILING_PROFIT, profit_pct - 3.5)
                                 save_state(state_data)
                             
                             if check_count % 4 == 0:
@@ -552,8 +572,20 @@ def main():
                             fast_exit_reason = None
                             if profit_pct >= 15.0:
                                 fast_exit_reason = f"Take-Profit en tiempo real (+{profit_pct:.2f}% >= +15%)"
-                            elif state_data.get("trailing_stop_pnl") is not None and profit_pct <= state_data["trailing_stop_pnl"]:
-                                fast_exit_reason = f"Trailing Stop Activado (+{profit_pct:.2f}%, pico fue +{state_data['max_pnl_seen']:.2f}%)"
+                            elif state_data.get("trailing_stop_pnl") is not None:
+                                # Normal Trailing Stop: trigger only if STILL safely above profit floor
+                                if state_data["trailing_stop_pnl"] >= profit_pct >= MIN_TRAILING_PROFIT:
+                                    fast_exit_reason = f"Trailing Stop Activado (+{profit_pct:.2f}%, pico fue +{state_data['max_pnl_seen']:.2f}%)"
+                                # Flash Dump defense: price collapsed through the trailing stop down below the profit floor
+                                elif profit_pct < MIN_TRAILING_PROFIT:
+                                    logging.warning(
+                                        f"⚠️ Flash dump detectado on-chain: PnL cayó de pico +{state_data.get('max_pnl_seen', 0.0):.2f}% "
+                                        f"a {profit_pct:+.2f}% (debajo del piso +{MIN_TRAILING_PROFIT:.1f}%). "
+                                        f"Desarmando Trailing Stop para evitar vender en pérdida en el fondo del mechazo."
+                                    )
+                                    state_data["trailing_stop_pnl"] = None
+                                    state_data["max_pnl_seen"] = max(0.0, profit_pct)
+                                    save_state(state_data)
                                 
                             if fast_exit_reason:
                                 logging.info(f"🎯 TRIGGER DISPARADO ON-CHAIN: {fast_exit_reason}")
@@ -564,7 +596,7 @@ def main():
                                     f"🔹 Precio Spot: `${spot_price:.8f}`\n"
                                     f"🔹 Precio de Entrada: `${buy_price:.8f}`\n"
                                     f"📈 Ganancia: `+{profit_pct:.2f}%`\n"
-                                    f"🚀 Ejecutando venta inmediata..."
+                                    f"🚀 Ejecutando venta con protección de slippage..."
                                 )
                                 if execute_sell(spot_price, reason=fast_exit_reason, buy_price=buy_price):
                                     state_data = {

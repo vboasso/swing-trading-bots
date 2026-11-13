@@ -1,24 +1,30 @@
 #!/bin/bash
+# WiFi & LAN Keep-Alive Watchdog for Intel Centrino Wireless-N 105
 fails=0
+
 while true; do
-    # Usar un nombre de dominio (google.com) en lugar de una IP (8.8.8.8)
-    # Esto garantiza que probamos TANTO la conexión a internet COMO el servicio DNS.
-    if ! ping -c 3 -W 5 google.com > /dev/null 2>&1; then
+    # 1. Keep LAN presence and ARP table actively refreshed (prevents router/PC from dropping netbook)
+    arping -U -c 1 -I wlp1s0 192.168.120.28 > /dev/null 2>&1
+    ping -c 1 -W 2 192.168.120.1 > /dev/null 2>&1
+
+    # 2. Test Internet and DNS connectivity
+    if ! ping -c 2 -W 3 google.com > /dev/null 2>&1; then
         fails=$((fails+1))
-        echo "$(date) - Ping/DNS fallido. Contador: $fails/12" >> /home/vale/swing-trading-bots/wifi_watchdog.log
+        echo "$(date) - Ping/DNS fallido. Contador: $fails/10" >> /home/vale/swing-trading-bots/wifi_watchdog.log
     else
         if [ $fails -gt 0 ]; then
-            echo "$(date) - Conexión y DNS recuperados. Reiniciando contador." >> /home/vale/swing-trading-bots/wifi_watchdog.log
+            echo "$(date) - Conexi?n y DNS recuperados. Reiniciando contador." >> /home/vale/swing-trading-bots/wifi_watchdog.log
         fi
         fails=0
     fi
-    
-    if [ $fails -ge 12 ]; then
-        echo "$(date) - Red o DNS caídos por 60 min. Ejecutando reinicio de NetworkManager..." >> /home/vale/swing-trading-bots/wifi_watchdog.log
+
+    # 3. If disconnected from internet for 10 min, self-heal connection
+    if [ $fails -ge 10 ]; then
+        echo "$(date) - Red ca?da por 10 minutos. Reiniciando NetworkManager..." >> /home/vale/swing-trading-bots/wifi_watchdog.log
         systemctl restart NetworkManager
         fails=0
-        sleep 60
+        sleep 30
     fi
-    
-    sleep 300
+
+    sleep 60
 done
